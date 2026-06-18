@@ -1,0 +1,387 @@
+#!/usr/bin/env python3
+"""
+BSF Solar Dispatch Starter — installer / orchestrator.
+
+Stdlib only. Reads ONE config.json (see config.example.json) and:
+  - stamps every site-specific value into the Node-RED flow (token substitution,
+    node --check verified),
+  - generates the dashboard's runtime config,
+  - installs the Python publisher as a background service,
+  - smoke-tests live data.
+
+Subcommands:  check · flow · dashboard · publisher · widget · smoke · all · reset-trial
+Flags:  --target DIR · --deploy · --dry-run · --no-start · --reset-trial · --force
+Env:    BETA_TESTER=1  -> dashboard trial = 90 days
+"""
+import argparse, json, os, ssl, sys, subprocess, shutil, urllib.request, time, platform, tempfile
+
+HERE     = os.path.dirname(os.path.abspath(__file__))
+ROOT     = os.path.dirname(HERE)
+CFG_PATH = os.path.join(ROOT, "config.json")
+SRC_FLOW = os.path.join(ROOT, "node-red", "bsf-solar-dispatch.flow.json")
+SRC_PUB  = os.path.join(ROOT, "publisher", "solar_state_publisher.py")
+DASH_DIR = os.path.join(ROOT, "dashboard")
+APK      = os.path.join(ROOT, "widget", "android", "BSF-Solar-Dispatch-v3.apk")
+LABEL    = "farm.bsf.solar-dispatch-starter"
+
+C_OK,C_WARN,C_ERR,C_DIM,C_END = "\033[92m","\033[93m","\033[91m","\033[90m","\033[0m"
+def ok(m):   print(f"{C_OK}  ok {m}{C_END}")
+def warn(m): print(f"{C_WARN}  ! {m}{C_END}")
+def err(m):  print(f"{C_ERR}  x {m}{C_END}")
+def step(m): print(f"\n{C_DIM}-- {m} --{C_END}")
+
+# tested-default for every dispatcher token (so a missing/blank config value can NEVER
+# produce broken JS — it falls back to the original shipped behaviour).
+DISP_DEFAULTS = {
+  "__DISP_SURPLUS_ON_W__":1800,"__DISP_SURPLUS_OFF_W__":1200,"__DISP_SURPLUS_OFF_W_CURT__":300,
+  "__DISP_ELEMENT_W__":1600,"__DISP_LOAD_CAP_W__":4000,"__DISP_SAFETY_CAP_W__":4200,
+  "__DISP_SUSTAIN_OFF_MS_CURT__":180000,"__DISP_SUSTAIN_OFF_MS__":60000,"__DISP_SUSTAIN_ON_MS__":60000,
+  "__DISP_CURTAIL_FRONIUS_W__":50,
+  "__DISP_W1_SOC_ON__":80,"__DISP_W1_SOC_OFF__":75,"__DISP_W2_SOC_ON__":90,"__DISP_W2_SOC_OFF__":85,
+  "__DISP_W3_SOC_ON__":99,"__DISP_W3_SOC_OFF__":98,
+  "__AC_W1_SOC_ON__":80,"__AC_W1_SOC_OFF__":75,"__AC_W2_SOC_ON__":90,"__AC_W2_SOC_OFF__":85,
+  "__AC_W3_SOC_ON__":99,"__AC_W3_SOC_OFF__":98,
+  "__AC_SUSTAIN_ON_MS__":60000,"__AC_SUSTAIN_OFF_MS__":60000,
+  "__AC_INSIDE_ON_DEFAULT__":19,"__AC_INSIDE_OFF_DEFAULT__":22,
+}
+
+def load_cfg():
+    if not os.path.exists(CFG_PATH):
+        err(f"config.json not found at {CFG_PATH}")
+        print("    Copy the template first:  cp config.example.json config.json")
+        print("    (or open this folder with Claude Code and say 'install BSF Solar Dispatch')")
+        sys.exit(2)
+    with open(CFG_PATH) as f:
+        return json.load(f)
+
+def _g(d, path, default=None):
+    cur = d
+    for k in path.split("."):
+        if not isinstance(cur, dict) or k not in cur: return default
+        cur = cur[k]
+    return cur
+def _num(v, d): return v if isinstance(v,(int,float)) and not isinstance(v,bool) else d
+def _strip_scheme(h): return (h or "").replace("https://","").replace("http://","").rstrip("/")
+def _loads_by_role(cfg):
+    return {l.get("role"): l for l in (cfg.get("loads") or []) if isinstance(l, dict)}
+
+def _ssl_unverified():
+    c = ssl.create_default_context(); c.check_hostname=False; c.verify_mode=ssl.CERT_NONE; return c
+
+# ---- chemistry -> SOC display bands -------------------------------------------
+CHEM_BANDS = {"lead-acid":(60,75), "lifepo4":(20,40), "lithium-ion":(20,40)}
+def soc_bands(cfg):
+    chem = (_g(cfg,"battery.chemistry","lead-acid") or "lead-acid").lower()
+    d_def,w_def = CHEM_BANDS.get(chem, (60,75))
+    return _num(_g(cfg,"battery.soc_danger_pct"), d_def), _num(_g(cfg,"battery.soc_warn_pct"), w_def), chem
+
+# ---- token map (config -> every flow token) -----------------------------------
+def token_map(cfg):
+    H=cfg.get("hardware",{}) or {}; T=cfg.get("tuya",{}) or {}; D=cfg.get("dispatcher",{}) or {}
+    sw=D.get("soc_windows",{}) or {}; ac=D.get("ac",{}) or {}; loc=cfg.get("location",{}) or {}
+    L=_loads_by_role(cfg)
+    def lf(role, field): return ((L.get(role) or {}).get(field) or "")
+    w=lambda win,side: _num((sw.get(win) or {}).get(side), DISP_DEFAULTS[f"__DISP_{win.upper()}_SOC_{side.upper()}__"])
+    m = {
+      "__CERBO_IP__": H.get("cerbo_ip") or "192.168.1.50",
+      "__VRM_PORTAL_ID__": H.get("vrm_portal_id") or "",
+      "__TUYA_ACCESS_ID__": T.get("access_id") or "",
+      "__TUYA_ACCESS_SECRET__": T.get("access_secret") or "",
+      "__TUYA_API_HOST__": _strip_scheme(T.get("api_host") or "openapi.tuyaus.com"),
+      "__LAT__": repr(_num(loc.get("lat"), -27.47)),
+      "__LON__": repr(_num(loc.get("lon"), 153.02)),
+      "__TUYA_DEVICE_HW__": lf("hot_water","device_id"),
+      "__TUYA_DEVICE_AC__": lf("air_con","device_id"),
+      "__TUYA_DEVICE_INSIDE__": lf("inside_temp","device_id"),
+      "__TUYA_LOCAL_KEY_HW__": lf("hot_water","local_key"),
+      "__TUYA_LOCAL_KEY_AC__": lf("air_con","local_key"),
+      "__TUYA_LOCAL_KEY_INSIDE__": lf("inside_temp","local_key"),
+      "__TUYA_LOCAL_KEY_WELLPUMP__": lf("well_pump","local_key"),
+      "__TUYA_LOCAL_IP_HW__": lf("hot_water","local_ip"),
+      "__TUYA_LOCAL_IP_AC__": lf("air_con","local_ip"),
+      "__TUYA_LOCAL_IP_INSIDE__": lf("inside_temp","local_ip"),
+      "__TUYA_LOCAL_IP_WELLPUMP__": lf("well_pump","local_ip"),
+    }
+    disp = {
+      "__DISP_SURPLUS_ON_W__":D.get("surplus_on_w"),"__DISP_SURPLUS_OFF_W__":D.get("surplus_off_w"),
+      "__DISP_SURPLUS_OFF_W_CURT__":D.get("surplus_off_w_curt"),"__DISP_CURTAIL_FRONIUS_W__":D.get("curtail_fronius_w"),
+      "__DISP_LOAD_CAP_W__":D.get("load_cap_w"),"__DISP_SAFETY_CAP_W__":D.get("safety_cap_w"),
+      "__DISP_ELEMENT_W__":D.get("hw_element_w"),
+      "__DISP_SUSTAIN_ON_MS__":D.get("sustain_on_ms"),"__DISP_SUSTAIN_OFF_MS__":D.get("sustain_off_ms"),
+      "__DISP_SUSTAIN_OFF_MS_CURT__":D.get("sustain_off_ms_curt"),
+      "__DISP_W1_SOC_ON__":w("w1","on"),"__DISP_W1_SOC_OFF__":w("w1","off"),
+      "__DISP_W2_SOC_ON__":w("w2","on"),"__DISP_W2_SOC_OFF__":w("w2","off"),
+      "__DISP_W3_SOC_ON__":w("w3","on"),"__DISP_W3_SOC_OFF__":w("w3","off"),
+      "__AC_W1_SOC_ON__":w("w1","on"),"__AC_W1_SOC_OFF__":w("w1","off"),
+      "__AC_W2_SOC_ON__":w("w2","on"),"__AC_W2_SOC_OFF__":w("w2","off"),
+      "__AC_W3_SOC_ON__":w("w3","on"),"__AC_W3_SOC_OFF__":w("w3","off"),
+      "__AC_SUSTAIN_ON_MS__":D.get("sustain_on_ms"),"__AC_SUSTAIN_OFF_MS__":D.get("sustain_off_ms"),
+      "__AC_INSIDE_ON_DEFAULT__":_g(D,"ac.inside_temp_on_c"),"__AC_INSIDE_OFF_DEFAULT__":_g(D,"ac.inside_temp_off_c"),
+    }
+    for k,v in disp.items():
+        m[k] = str(int(v) if isinstance(v,(int,float)) and not isinstance(v,bool) else DISP_DEFAULTS[k])
+    return m
+
+# ---- validation ---------------------------------------------------------------
+def validate(cfg):
+    issues=[]; warns=[]
+    chem=(_g(cfg,"battery.chemistry","lead-acid") or "").lower()
+    if chem not in CHEM_BANDS: warns.append(f"battery.chemistry '{chem}' unknown — using lead-acid bands.")
+    dpct,wpct,_=soc_bands(cfg)
+    if dpct>=wpct: issues.append(f"battery.soc_danger_pct ({dpct}) must be < soc_warn_pct ({wpct}).")
+    if chem in ("lifepo4","lithium-ion") and dpct>40:
+        warns.append(f"lithium chemistry with soc_danger_pct={dpct} is conservative (typical ~20).")
+    if chem=="lead-acid" and dpct<55:
+        warns.append(f"lead-acid with soc_danger_pct={dpct} is aggressive — lead-acid shouldn't sit low.")
+    D=cfg.get("dispatcher",{}) or {}
+    son,soff=_num(D.get("surplus_on_w"),1800),_num(D.get("surplus_off_w"),1200)
+    if son<=soff: issues.append(f"dispatcher.surplus_on_w ({son}) must be > surplus_off_w ({soff}).")
+    lc,sc=_num(D.get("load_cap_w"),4000),_num(D.get("safety_cap_w"),4200)
+    if sc<lc: issues.append(f"dispatcher.safety_cap_w ({sc}) must be >= load_cap_w ({lc}).")
+    sw=D.get("soc_windows",{}) or {}
+    last=0
+    for win in ("w1","w2","w3"):
+        o,f=_num((sw.get(win) or {}).get("on"),0),_num((sw.get(win) or {}).get("off"),0)
+        if o and f and o<=f: issues.append(f"soc_windows.{win}: on ({o}) must be > off ({f}).")
+        if o and o<last: warns.append(f"soc_windows.{win}.on ({o}) < previous window — windows usually rise through the day.")
+        last=o or last
+    ac=D.get("ac",{}) or {}
+    if (ac.get("mode") or "heating")=="cooling":
+        warns.append("dispatcher.ac.mode='cooling' flips dashboard labels + setpoints only; the dispatcher ships HEATING-direction (see troubleshooting → Summer cooling).")
+    elif _num(ac.get("inside_temp_on_c"),19)>=_num(ac.get("inside_temp_off_c"),22):
+        issues.append("heating mode: dispatcher.ac.inside_temp_on_c must be < inside_temp_off_c.")
+    if not (cfg.get("loads") or []): warns.append("no loads defined — nothing to dispatch (publisher/dashboard still run).")
+    return issues, warns
+
+# ---- check --------------------------------------------------------------------
+def cmd_check(cfg, args):
+    step("Validating config.json")
+    issues,warns = validate(cfg)
+    cerbo=_g(cfg,"hardware.cerbo_ip","")
+    (warn if (not cerbo or cerbo.endswith(".50")) else ok)(f"cerbo_ip = {cerbo or '(unset)'}")
+    dpct,wpct,chem=soc_bands(cfg); ok(f"battery = {chem} (SOC red <= {dpct}%, amber < {wpct}%)")
+    nplugs=len(cfg.get("loads") or []); ok(f"{nplugs} load(s) configured")
+    if _g(cfg,"tuya.access_id","").startswith("YOUR_"): warn("Tuya access_id not set (Tuya features idle).")
+    for w_ in warns: warn(w_)
+    for i in issues: err(i)
+    step("Reaching the Cerbo Node-RED admin API")
+    try: ok(f"Cerbo {cerbo}:1881 reachable (flow rev {_flow_rev(cerbo)}).")
+    except Exception as e: warn(f"Cerbo {cerbo}:1881 not reachable ({e.__class__.__name__}); stage files now, deploy when online.")
+    print(); (err if issues else ok)(f"check complete — {len(issues)} blocker(s), {len(warns)} warning(s).")
+    return len(issues)
+
+# ---- flow ---------------------------------------------------------------------
+def _flow_rev(cerbo):
+    req=urllib.request.Request(f"https://{cerbo}:1881/flows", headers={"Node-RED-API-Version":"v2"})
+    with urllib.request.urlopen(req, timeout=8, context=_ssl_unverified()) as r:
+        return json.loads(r.read().decode()).get("rev")
+
+def build_flow(cfg):
+    raw=open(SRC_FLOW).read()
+    tm=token_map(cfg)
+    for tok,val in tm.items(): raw=raw.replace(tok, str(val))
+    leftover=sorted(set(__import__("re").findall(r"__[A-Z0-9_]+__", raw)))
+    flows=json.loads(raw)                                  # validates JSON post-substitution
+    out=os.path.join(ROOT,".build"); os.makedirs(out, exist_ok=True)
+    dest=os.path.join(out,"bsf-solar-dispatch.deployed.flow.json")
+    json.dump(flows, open(dest,"w"), indent=2)
+    return dest, flows, leftover
+
+def _node_check(flows):
+    node=shutil.which("node")
+    if not node: return None
+    bad=[]
+    for n in flows:
+        if isinstance(n,dict) and n.get("type")=="function" and n.get("func"):
+            # async wrapper: Node-RED function nodes may use top-level await
+            wrapped="(async function(){\n"+n["func"]+"\n})"
+            with tempfile.NamedTemporaryFile("w",suffix=".js",delete=False) as f:
+                f.write(wrapped); p=f.name
+            r=subprocess.run([node,"--check",p], capture_output=True, text=True); os.unlink(p)
+            if r.returncode!=0:
+                msg=next((l.strip() for l in r.stderr.splitlines() if "Error" in l), r.stderr.strip()[:120])
+                bad.append((n.get("name") or n.get("id"), msg))
+    return bad
+
+def cmd_flow(cfg, args):
+    step("Stamping config into the Node-RED flow")
+    dest,flows,leftover = build_flow(cfg)
+    ok(f"Wrote substituted flow → {dest} ({len(flows)} nodes)")
+    if leftover: warn("Un-substituted tokens remain (check config): "+", ".join(leftover))
+    bad=_node_check(flows)
+    if bad is None: warn("node not found — skipped JS syntax check of function bodies.")
+    elif bad:
+        for nm,e in bad: err(f"function '{nm}' failed node --check: {e}")
+        err("Refusing to deploy a flow with broken function code."); return 1
+    else: ok("All function bodies pass node --check.")
+    if args.dry_run or not args.deploy:
+        warn("Dry-run: NOT deploying to the Cerbo. Re-run with --deploy to push it live."); return 0
+    cerbo=_g(cfg,"hardware.cerbo_ip","")
+    step(f"Deploying to Cerbo {cerbo} (type=flows — only changed tabs restart)")
+    try:
+        rev=_flow_rev(cerbo)
+        body=json.dumps({"flows":flows,"rev":rev}).encode()
+        req=urllib.request.Request(f"https://{cerbo}:1881/flows", data=body, method="POST",
+            headers={"Content-Type":"application/json","Node-RED-API-Version":"v2","Node-RED-Deployment-Type":"flows"})
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_unverified()) as r:
+            ok(f"Deployed. rev {rev} → {json.loads(r.read().decode()).get('rev')}")
+    except Exception as e:
+        err(f"Deploy failed: {e}")
+        print("    Cerbo offline, or Node-RED admin auth on (open https://%s:1881). Paste the error into Claude Code." % cerbo)
+        return 1
+    return 0
+
+# ---- dashboard ----------------------------------------------------------------
+def cmd_dashboard(cfg, args):
+    step("Writing dashboard-config.js")
+    beta=os.environ.get("BETA_TESTER","") not in ("","0","false","False")
+    trial=90 if beta else int(_num(_g(cfg,"dashboard.trial_days"),30))
+    dpct,wpct,chem=soc_bands(cfg); D=cfg.get("dispatcher",{}) or {}
+    sw=D.get("soc_windows",{}) or {}; ac=D.get("ac",{}) or {}
+    js={
+      "siteName": cfg.get("site_name","Solar"),
+      "cerboIp": _g(cfg,"hardware.cerbo_ip","192.168.1.50"),
+      "lat": _num(_g(cfg,"location.lat"),-27.47), "lon": _num(_g(cfg,"location.lon"),153.02),
+      "trialDays": trial, "gumroadUrl": _g(cfg,"dashboard.gumroad_url",""),
+      "chemistry": chem, "socDanger": dpct, "socWarn": wpct,
+      "currencySymbol": _g(cfg,"display.currency_symbol","$"), "pricePerKwh": _num(_g(cfg,"display.price_per_kwh"),0),
+      "acMode": (ac.get("mode") or "heating"),
+      # CFG mirror so the dashboard's display gates match the deployed dispatcher:
+      "SURPLUS_ON": _num(D.get("surplus_on_w"),1800), "SURPLUS_OFF": _num(D.get("surplus_off_w"),1200),
+      "ELEMENT": _num(D.get("hw_element_w"),1600), "AC_CAP": _num(D.get("load_cap_w"),4000),
+      "AC_SAFETY": _num(D.get("safety_cap_w"),4200),
+      "SOC_ON": _num((sw.get("w1") or {}).get("on"),80), "SOC_OFF": _num((sw.get("w1") or {}).get("off"),75),
+      "INSIDE_ON": _num(ac.get("inside_temp_on_c"),19), "INSIDE_OFF": _num(ac.get("inside_temp_off_c"),22),
+      "BATT_CAP_KWH": _g(cfg,"battery.capacity_kwh"),
+    }
+    dest=os.path.join(DASH_DIR,"dashboard-config.js")
+    with open(dest,"w") as f:
+        f.write("// Generated by install/deploy.py — edit freely, then refresh the dashboard.\n")
+        f.write("window.BSF_CONFIG = "+json.dumps(js,indent=2)+";\n")
+    ok(f"Wrote {dest}  (trial {trial}d{' · BETA_TESTER' if beta else ''}, {chem}, ac={js['acMode']})")
+    return 0
+
+# ---- publisher ----------------------------------------------------------------
+def _target_dir(args):
+    return os.path.abspath(args.target) if args.target else os.path.join(os.path.expanduser("~"),"bsf-solar-dispatch")
+
+def cmd_publisher(cfg, args):
+    tgt=_target_dir(args); step(f"Installing publisher → {tgt}")
+    os.makedirs(tgt, exist_ok=True)
+    data_dir=_g(cfg,"out_dir") or os.path.join(tgt,"dispatch-host"); os.makedirs(data_dir, exist_ok=True)
+    shutil.copy2(SRC_PUB, os.path.join(tgt,"solar_state_publisher.py"))
+    shutil.copy2(os.path.join(DASH_DIR,"solar_dispatch_dashboard.html"), os.path.join(data_dir,"solar_dispatch_dashboard.html"))
+    dcfg=os.path.join(DASH_DIR,"dashboard-config.js")
+    if os.path.exists(dcfg): shutil.copy2(dcfg, os.path.join(data_dir,"dashboard-config.js"))
+    resolved=dict(cfg); resolved["out_dir"]=data_dir
+    cfg_dest=os.path.join(tgt,"config.json"); json.dump(resolved, open(cfg_dest,"w"), indent=2)
+    ok(f"Staged publisher + config + dashboard (data dir {data_dir})")
+    py=shutil.which("python3") or sys.executable; sysname=platform.system()
+    if sysname=="Darwin":
+        plist=os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
+        if os.path.exists(plist) and not args.force: warn(f"{plist} exists — use --force. Skipping service.")
+        else:
+            _write_plist(plist, py, os.path.join(tgt,"solar_state_publisher.py"), cfg_dest, tgt)
+            ok(f"Wrote launchd plist → {plist}")
+            if args.no_start: warn(f"--no-start: load later with: launchctl bootstrap gui/$(id -u) {plist}")
+            else:
+                subprocess.run(["launchctl","bootout",f"gui/{os.getuid()}/{LABEL}"], capture_output=True)
+                r=subprocess.run(["launchctl","bootstrap",f"gui/{os.getuid()}",plist], capture_output=True, text=True)
+                (ok if r.returncode==0 else warn)(f"launchctl bootstrap rc={r.returncode} {r.stderr.strip()}")
+    elif sysname=="Linux":
+        unit=os.path.expanduser(f"~/.config/systemd/user/{LABEL}.service"); os.makedirs(os.path.dirname(unit), exist_ok=True)
+        if os.path.exists(unit) and not args.force: warn(f"{unit} exists — use --force. Skipping service.")
+        else:
+            _write_systemd(unit, py, os.path.join(tgt,"solar_state_publisher.py"), cfg_dest, tgt)
+            ok(f"Wrote systemd unit → {unit}")
+            if args.no_start: warn(f"--no-start: enable later: systemctl --user enable --now {LABEL}")
+            else:
+                subprocess.run(["systemctl","--user","daemon-reload"])
+                r=subprocess.run(["systemctl","--user","enable","--now",LABEL], capture_output=True, text=True)
+                (ok if r.returncode==0 else warn)(f"systemctl enable --now rc={r.returncode} {r.stderr.strip()}")
+    else:
+        warn(f"OS '{sysname}': run manually:  BSF_CONFIG={cfg_dest} {py} {os.path.join(tgt,'solar_state_publisher.py')}")
+    print(f"\n  Dashboard served from: {data_dir}\n  Quick static server:  cd {data_dir} && {py} -m http.server 8780")
+    return 0
+
+def _write_plist(path, py, script, cfg, wd):
+    import plistlib
+    plistlib.dump({"Label":LABEL,"ProgramArguments":[py,script],"EnvironmentVariables":{"BSF_CONFIG":cfg},
+        "WorkingDirectory":wd,"RunAtLoad":True,"KeepAlive":True,
+        "StandardOutPath":"/tmp/bsf-solar-dispatch.log","StandardErrorPath":"/tmp/bsf-solar-dispatch.err"}, open(path,"wb"))
+
+def _write_systemd(path, py, script, cfg, wd):
+    open(path,"w").write(f"""[Unit]
+Description=BSF Solar Dispatch publisher (read-only relay)
+After=network-online.target
+
+[Service]
+Environment=BSF_CONFIG={cfg}
+WorkingDirectory={wd}
+ExecStart={py} {script}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+""")
+
+# ---- widget / smoke / reset ---------------------------------------------------
+def cmd_widget(cfg, args):
+    step("Sideloading the Android widget APK")
+    adb=shutil.which("adb") or os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
+    if not (shutil.which("adb") or os.path.exists(adb)):
+        warn("adb not found. Copy the APK to your phone manually, or for iPhone see widget/ios/README.md."); print(f"      {APK}"); return 1
+    if not os.path.exists(adb): adb=shutil.which("adb")
+    devs=subprocess.run([adb,"devices"], capture_output=True, text=True).stdout
+    if not [l for l in devs.splitlines()[1:] if l.strip() and "device" in l]:
+        warn("No adb device. Wake/unlock the phone (wireless-debug sleeps on lock) and re-run `widget`."); return 1
+    r=subprocess.run([adb,"install","-r",APK], capture_output=True, text=True)
+    (ok if r.returncode==0 else err)(f"adb install rc={r.returncode}: {r.stdout.strip() or r.stderr.strip()}"); return r.returncode
+
+def cmd_smoke(cfg, args):
+    step("Smoke test — is live data flowing?")
+    data_dir=_g(cfg,"out_dir") or os.path.join(_target_dir(args),"dispatch-host")
+    state=os.path.join(data_dir,"state.json")
+    for _ in range(6):
+        if os.path.exists(state): break
+        time.sleep(5)
+    if not os.path.exists(state):
+        warn(f"No {state} yet. Publisher running? Check /tmp/bsf-solar-dispatch.err"); return 1
+    age=time.time()-os.path.getmtime(state); d=json.load(open(state))
+    ok(f"state.json present ({age:.0f}s old) — ok={d.get('ok')} source={d.get('source')} hw_age_s={d.get('hw_age_s')}")
+    (ok if (age<60 and d.get('ok')) else warn)("Fresh state." if (age<60 and d.get('ok')) else "Stale/ok=false — check the Cerbo broker.")
+    return 0
+
+def cmd_reset_trial(cfg, args):
+    step("Re-arming the dashboard free trial")
+    cmd_dashboard(cfg, args)
+    dcfg=os.path.join(DASH_DIR,"dashboard-config.js"); txt=open(dcfg).read()
+    js=json.loads(txt[txt.index("{"):txt.rindex("}")+1]); js["trialResetAt"]=int(time.time()*1000)
+    with open(dcfg,"w") as f:
+        f.write("// Generated by install/deploy.py --reset-trial\n")
+        f.write("window.BSF_CONFIG = "+json.dumps(js,indent=2)+";\n")
+    ok("Bumped trialResetAt — trial restarts on next dashboard load.")
+    print("    Or reset just your own device instantly:  <dashboard-url>?reset_trial=true")
+    return 0
+
+def main():
+    ap=argparse.ArgumentParser(description="BSF Solar Dispatch Starter installer")
+    ap.add_argument("command", nargs="?", default="check",
+        choices=["check","flow","dashboard","publisher","widget","smoke","all","reset-trial"])
+    ap.add_argument("--target"); ap.add_argument("--deploy", action="store_true")
+    ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--no-start", action="store_true")
+    ap.add_argument("--reset-trial", action="store_true"); ap.add_argument("--force", action="store_true")
+    args=ap.parse_args()
+    if args.reset_trial: args.command="reset-trial"
+    print(f"{C_DIM}BSF Solar Dispatch Starter · {args.command}{C_END}")
+    cfg=load_cfg(); rc=0
+    fn={"check":cmd_check,"flow":cmd_flow,"dashboard":cmd_dashboard,"publisher":cmd_publisher,
+        "widget":cmd_widget,"smoke":cmd_smoke,"reset-trial":cmd_reset_trial}.get(args.command)
+    if fn: rc=fn(cfg, args)
+    elif args.command=="all":
+        cmd_check(cfg,args); cmd_flow(cfg,args); cmd_dashboard(cfg,args); cmd_publisher(cfg,args); cmd_smoke(cfg,args)
+    print()
+    sys.exit(rc if isinstance(rc,int) else 0)
+
+if __name__=="__main__": main()

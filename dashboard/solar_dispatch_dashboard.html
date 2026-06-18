@@ -1,0 +1,2679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>BSF Solar Dispatch — live</title>
+<style>
+  :root{
+    --bg:#0a0f1c; --bg2:#0d1424; --card:#111a2e; --card2:#0f1626; --line:#1f2c46;
+    --ink:#e8eef8; --mut:#8b98ad; --dim:#5b6b86;
+    --gold:#f5b62e; --green:#34d399; --greenDim:#10301f; --cyan:#38bdf8;
+    --red:#ef4444; --redDim:#2a1014; --amber:#f0b364; --blue:#3a86c9;
+    --okbg:#0f2a1d; --okbd:#2f8f6a; --nobg:#2a1417; --nobd:#7a3038;
+    --r:14px; --rs:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  body{padding:14px 12px 40px;max-width:760px;margin:0 auto;}
+  a{color:var(--cyan)}
+  h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.2px}
+  .sub{color:var(--mut);font-size:12.5px;margin-top:2px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .spacer{flex:1}
+
+  /* connection pill */
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+    padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card2);white-space:nowrap}
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+  .pill.live{border-color:var(--okbd);color:var(--green)} .pill.live .dot{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .pill.connecting{border-color:#7a6a30;color:var(--gold)} .pill.connecting .dot{background:var(--gold);animation:blink 1s infinite}
+  .pill.stale,.pill.closed,.pill.error{border-color:var(--nobd);color:#ff8a8a} .pill.stale .dot,.pill.closed .dot,.pill.error .dot{background:var(--red)}
+  .pill.scrub{border-color:#7a6a30;color:var(--gold)} .pill.scrub .dot{background:var(--gold);box-shadow:0 0 6px var(--gold)}
+  @keyframes blink{50%{opacity:.3}}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-top:12px}
+  .card h2{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
+
+  /* metric tiles */
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .metric{background:var(--card2);border:1px solid var(--line);border-radius:var(--rs);padding:10px 8px}
+  .metric .k{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim)}
+  .metric .v{font-size:21px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+  .metric .u{font-size:11px;color:var(--mut);font-weight:500;margin-left:2px}
+  .metric.gold .v{color:var(--gold)} .metric.green .v{color:var(--green)} .metric.cyan .v{color:var(--cyan)}
+  .metric.amber .v{color:var(--amber)} .metric.blue .v{color:#7fc2f0}
+  .metric .sub2{font-size:10.5px;color:var(--dim);margin-top:2px}
+
+  /* diagram */
+  .diagram-wrap{position:relative;border-radius:var(--r);transition:box-shadow .3s}
+  .diagram-wrap.lockout{box-shadow:0 0 0 2px var(--red),0 0 22px 2px rgba(239,68,68,.45);animation:lockpulse 2.4s ease-in-out infinite}
+  @keyframes lockpulse{50%{box-shadow:0 0 0 2px var(--red),0 0 30px 6px rgba(239,68,68,.65)}}
+  .lockbadge{display:none;background:var(--redDim);border:1px solid var(--red);color:#ff9b9b;
+    font-size:12px;font-weight:700;padding:8px 12px;border-radius:10px;text-align:center;
+    margin-bottom:9px;line-height:1.4}
+  .lockbadge.show{display:block}
+  svg.flow{width:100%;height:auto;display:block;background:var(--card2);border:1px solid var(--line);border-radius:var(--r)}
+  .node-box{fill:#13203a;stroke:#33405e}
+  .node-label{fill:var(--mut);font-size:8px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+  .node-val{fill:var(--ink);font-size:14px;font-weight:700}
+  .node-sub{fill:var(--dim);font-size:7.5px}
+  .conn{stroke:#2a3a58;stroke-width:2.4;fill:none}
+  /* Unified flow colour (Steven 2026-06-15): every energy-flow stroke + particle is
+     the SAME warm yellow (--gold). Direction is read from dash/particle MOTION, never
+     from hue. Node-identity colours (SOC ring, HW/AC box borders, gates) are unchanged. */
+  .conn.flowing{stroke:var(--gold);stroke-dasharray:5 7;animation:dash 1s linear infinite}
+  .conn.gen.flowing{stroke:var(--gold)} .conn.hw.flowing{stroke:var(--gold)} .conn.ac.flowing{stroke:var(--gold)}
+  @keyframes dash{to{stroke-dashoffset:-24}}
+  .particle{opacity:0}
+  .particle.on{opacity:1}
+  /* sky band — sun + moon ride a horizon arc (display-only, SunCalc) */
+  .skyarc{stroke-width:1;stroke-dasharray:1.5 5;opacity:.5;stroke-linecap:round}
+  .skyarc.sun{stroke:#6a5a2e} .skyarc.moon{stroke:#3c4a66}
+  .skylbl{fill:#5b6b86;font-size:6px;letter-spacing:1px;font-weight:700}
+  .loadbox{fill:#161d2e;stroke:#3a455f;transition:all .3s}
+  .loadbox.on.hw{fill:#2a1c10;stroke:var(--amber);filter:drop-shadow(0 0 6px rgba(240,179,100,.6))}
+  .loadbox.on.ac{fill:#101f2e;stroke:var(--blue);filter:drop-shadow(0 0 6px rgba(58,134,201,.6))}
+  .onbadge{fill:var(--dim);font-size:8px;font-weight:800;letter-spacing:.5px}
+  .onbadge.on.hw{fill:var(--amber)} .onbadge.on.ac{fill:#7fc2f0}
+  .socring-bg{fill:none;stroke:#22304a;stroke-width:6}
+  .socring-fg{fill:none;stroke:var(--green);stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .4s,stroke .3s}
+  /* v5: Fronius AC bypass + tap-to-drill MPPT */
+  .src-box{fill:#1c2410;stroke:#5e5326}
+  /* v2.x: Total AC Output reconciliation band (AC-bus balance cross-check) */
+  .totac-box{fill:#0f1828;stroke:#3a4b6b;stroke-width:1.5;transition:stroke .3s,fill .3s}
+  .totac-box.warn{stroke:var(--amber);fill:#211a10}
+  .conn.fron.flowing{stroke:var(--gold)} .conn.chg.flowing{stroke:var(--gold)} .conn.dis.flowing{stroke:var(--gold)}
+  .conn.flowing.rev{animation:dashRev 1s linear infinite}
+  @keyframes dashRev{to{stroke-dashoffset:24}}
+  .tappable{cursor:pointer}
+  .throtdot{fill:var(--gold);opacity:0} .throtdot.on{opacity:1}
+  .drill{max-height:0;overflow:hidden;transition:max-height .28s ease}
+  .drill.open{max-height:380px;margin-top:10px}
+  .drillcard{background:var(--card2);border:1px solid var(--line);border-radius:var(--rs);padding:12px}
+  .drillhead{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .drillhead .nm{font-weight:700;font-size:13px}
+  .drillhead .cl{margin-left:auto;font-size:11px;color:var(--cyan);font-weight:700;cursor:pointer}
+  .chrow{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--line);font-size:13px}
+  .chrow:last-child{border-bottom:0}
+  .chrow .cn{font-weight:600} .chrow .ct{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:700}
+  .chrow .pill{font-size:9.5px;font-weight:800;padding:1px 7px;border-radius:999px}
+  .pill.mppt{background:#1c2410;color:#d9b65a;border:1px solid #5e5326}
+  .pill.rs{background:#0e2236;color:#7fc2f0;border:1px solid #2f6f96}
+  .throtbar{margin-top:10px;background:#2a2410;border:1px solid #7a6a30;color:var(--gold);font-size:11.5px;font-weight:700;padding:8px 10px;border-radius:8px;line-height:1.45}
+  .throtbar.clear{background:var(--greenDim);border-color:var(--okbd);color:var(--green)}
+  .throtbar.info{background:#0f1f30;border-color:#2f5f8f;color:var(--cyan)}
+
+  /* gates */
+  .gatehead{display:flex;align-items:center;gap:8px;margin:4px 0 8px}
+  .gatehead .ic{font-size:15px}
+  .gatehead .nm{font-weight:700;font-size:14px}
+  .gatehead .st{margin-left:auto;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
+  .st.on{background:var(--greenDim);color:var(--green);border:1px solid var(--okbd)}
+  .st.off{background:var(--redDim);color:#ff8a8a;border:1px solid var(--nobd)}
+  .st.arming{background:#2a2410;color:var(--gold);border:1px solid #7a6a30}
+  .gates{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .gate{background:var(--card2);border:1px solid var(--line);border-radius:var(--rs);padding:8px 9px;position:relative}
+  .gate.pass{border-color:var(--okbd)} .gate.fail{border-color:var(--nobd)} .gate.unknown{border-color:#4a4a30}
+  .gate .gk{font-size:11px;color:var(--mut);font-weight:600}
+  .gate .gv{font-size:13.5px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums;line-height:1.25}
+  .gate .gt{font-size:10.5px;color:var(--dim);margin-top:2px}
+  .gate .mk{position:absolute;top:7px;right:8px;font-size:12px}
+  .gate.pass .mk{color:var(--green)} .gate.fail .mk{color:#ff7a7a} .gate.unknown .mk{color:var(--gold)}
+  .gate.pass .gv{color:var(--green)} .gate.fail .gv{color:#ff9b9b} .gate.unknown .gv{color:var(--gold)}
+
+  /* time machine */
+  .tm-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .tm-time{font-variant-numeric:tabular-nums;font-weight:700;font-size:14px}
+  .btn{background:var(--card2);border:1px solid var(--line);color:var(--ink);font-size:12px;font-weight:700;
+    padding:6px 12px;border-radius:999px;cursor:pointer}
+  .btn.active{background:var(--greenDim);border-color:var(--okbd);color:var(--green)}
+  input[type=range]{width:100%;accent-color:var(--cyan);height:26px}
+  .tm-note{font-size:11px;color:var(--dim);margin-top:4px}
+
+  /* history */
+  .hist{max-height:280px;overflow:auto;margin:-4px -4px 0;padding:4px}
+  .ev{display:flex;gap:9px;padding:8px 6px;border-bottom:1px solid var(--line);font-size:12.5px;align-items:flex-start}
+  .ev:last-child{border-bottom:0}
+  .ev .et{color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:11.5px;min-width:84px}
+  .ev .eb{flex:1}
+  .ev .tag{display:inline-block;font-size:10px;font-weight:800;padding:1px 6px;border-radius:5px;margin-right:6px;letter-spacing:.4px}
+  .tag.hw{background:#2a1c10;color:var(--amber)} .tag.ac{background:#101f2e;color:#7fc2f0}
+  .tag.on{background:var(--greenDim);color:var(--green)} .tag.off{background:var(--redDim);color:#ff8a8a}
+  .tag.warn{background:#2a2410;color:var(--gold)}
+  .ev .ed{color:var(--mut)}
+  .empty{color:var(--dim);font-size:12.5px;padding:10px 4px;text-align:center}
+
+  .stalebanner{display:none;background:var(--redDim);border:1px solid var(--nobd);color:#ff9b9b;
+    font-size:12.5px;font-weight:600;padding:9px 12px;border-radius:var(--rs);margin-top:12px}
+  .stalebanner.show{display:block}
+  .stalechips{margin-top:6px}
+  .chip{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;
+    background:var(--redDim);border:1px solid var(--nobd);color:#ff9b9b;margin:2px 4px 0 0}
+
+  footer{color:var(--dim);font-size:11px;line-height:1.6;margin-top:18px;border-top:1px solid var(--line);padding-top:12px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* collapsible cards — open/closed state persisted in localStorage. The whole
+     header row is the tap target; the body height animates via the 0fr↔1fr grid
+     trick (smooth, no fixed max-height to guess). */
+  .collapsible > .cardhdr, .collapsible > .gatehead{cursor:pointer;user-select:none;-webkit-user-select:none}
+  .chev{display:inline-block;color:var(--mut);font-size:11px;margin-right:8px;transition:transform .2s ease}
+  .gatehead .chev{margin-right:6px}
+  .collapsed .chev{transform:rotate(-90deg)}
+  .cardbody{display:grid;grid-template-rows:1fr;transition:grid-template-rows .2s ease}
+  .collapsed > .cardbody{grid-template-rows:0fr}
+  .cardbody > .cardbody-inner{overflow:hidden;min-height:0}
+
+  /* "This week" subheader separating real-time tiles from the 7-day aggregates */
+  .subhead{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;
+    color:var(--mut);font-weight:700;margin:16px 0 9px}
+  .subhead .subnote{font-size:10px;letter-spacing:.3px;text-transform:none;color:var(--dim);font-weight:500;margin-left:auto}
+
+  /* Curtailment summary (Phase A) — forward-tracked from the canonical MppOperationMode throttle */
+  .curt{margin-top:2px}
+  .curt-hero{font-size:25px;font-weight:800;color:var(--gold);line-height:1;font-variant-numeric:tabular-nums}
+  .curt-hero .cu{font-size:12px;font-weight:700;margin-left:2px;color:var(--gold)}
+  .curt-hero .pct{font-size:12px;font-weight:600;color:var(--mut);margin-left:9px}
+  .curt-fg{font-size:12px;color:var(--amber);font-weight:600;margin-top:6px}
+  .curt-fg .est{font-size:9px;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:1px 3px;
+    margin-left:4px;text-transform:uppercase;letter-spacing:.05em;cursor:help;font-weight:700}
+  .curt-trk{margin-top:11px;display:grid;gap:6px}
+  .ctk{display:grid;grid-template-columns:74px 1fr 46px;align-items:center;gap:9px;font-size:11px}
+  .ctk-k{color:var(--dim);font-weight:600;white-space:nowrap}
+  .ctk-bar{height:7px;background:var(--card2);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+  .ctk-bar>i{display:block;height:100%;background:var(--gold);width:0%;transition:width .35s ease}
+  .ctk-v{text-align:right;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .curt-none{color:var(--dim);font-size:11.5px;font-weight:500;line-height:1.4}
+
+  /* tappable diagram nodes (Phase C) — hint they open a detail card */
+  .node-tap{cursor:pointer}
+  .node-tap:hover .node-box,.node-tap:hover .src-box,.node-tap:hover .loadbox{filter:brightness(1.12)}
+
+  /* Detail modal (Phase C) — tap a node → time-series with resolution picker */
+  .detail{position:fixed;inset:0;z-index:50;background:rgba(4,8,16,.72);backdrop-filter:blur(3px);
+    display:flex;align-items:flex-end;justify-content:center}
+  .detail-card{background:var(--card);border:1px solid var(--line);border-top-left-radius:18px;border-top-right-radius:18px;
+    width:100%;max-width:760px;max-height:92vh;overflow:auto;padding:16px 16px 26px;box-shadow:0 -10px 40px rgba(0,0,0,.5)}
+  @media(min-width:620px){ .detail{align-items:center} .detail-card{border-radius:18px;max-height:88vh} }
+  .detail-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .detail-ic{font-size:18px}
+  .detail-title{font-size:16px;font-weight:800;letter-spacing:.2px}
+  .detail-sub{font-size:11px;color:var(--dim);font-weight:500}
+  .detail-x{margin-left:auto;cursor:pointer;color:var(--mut);font-size:15px;font-weight:700;padding:4px 8px;border:1px solid var(--line);border-radius:8px}
+  .detail-x:hover{color:var(--ink);border-color:var(--mut)}
+  .detail-res{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
+  .resbtn{font-size:11.5px;font-weight:700;padding:6px 12px;border-radius:999px;border:1px solid var(--line);
+    background:var(--card2);color:var(--mut);cursor:pointer;letter-spacing:.2px}
+  .resbtn.active{border-color:var(--gold);color:var(--gold);background:#241c08}
+  .resbtn.disabled{opacity:.4;cursor:not-allowed}
+  .detail-chartwrap{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:10px 8px 6px}
+  .detail-chart{width:100%;height:auto;display:block}
+  .dc-bar{fill:var(--gold)} .dc-bar.cur{fill:#e0701a}
+  .dc-cum{fill:none;stroke:#7fdcff;stroke-width:1.6;opacity:.95;stroke-linejoin:round}
+  .dc-curtband{fill:var(--red);opacity:.85}
+  .dc-axis{fill:var(--dim);font-size:8px;font-weight:600}
+  .dc-grid{stroke:var(--line);stroke-width:.6;opacity:.6}
+  .dc-ylab{fill:var(--mut);font-size:8px;font-weight:600}
+  .dc-atitle{font-size:8.5px;font-weight:700;letter-spacing:.2px}            /* per-axis title (colour = its series) */
+  .dc-tip{fill:#7fdcff;font-size:9px;font-weight:800}                        /* final cumulative value at the line's tip */
+  .detail-legend{display:flex;gap:14px;flex-wrap:wrap;margin:9px 2px 0;font-size:10.5px;color:var(--mut)}
+  .detail-legend .lg{display:inline-flex;align-items:center;gap:5px}
+  .detail-legend .sw{width:11px;height:4px;border-radius:2px;display:inline-block}
+  .detail-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:14px}
+  .dtile{background:var(--card2);border:1px solid var(--line);border-radius:9px;padding:9px 8px}
+  .dtile .k{font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--dim)}
+  .dtile .v{font-size:16px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums}
+  .dtile .v .u{font-size:10px;color:var(--mut);font-weight:600;margin-left:1px}
+  .dtile.delta .v.up{color:var(--green)} .dtile.delta .v.down{color:#ff8a8a}
+  .detail-pc{display:grid;gap:5px;margin-top:13px}
+  .detail-pcrow{display:grid;grid-template-columns:80px 1fr 52px;align-items:center;gap:9px;font-size:11px}
+  .detail-note{font-size:10.5px;color:var(--dim);margin-top:12px;line-height:1.45}
+  @media(max-width:430px){ .detail-tiles{grid-template-columns:repeat(2,1fr)} }
+
+  @media(max-width:430px){
+    .metrics{grid-template-columns:repeat(2,1fr)}
+    .gates{grid-template-columns:1fr}
+  }
+</style>
+<!-- ============================================================================
+     BSF Solar Dispatch Starter — site configuration bootstrap
+     Edit dashboard-config.js (generated by install/deploy.py) to point this
+     dashboard at YOUR Cerbo and YOUR location. No HTML rebuild needed: change
+     dashboard-config.js, refresh the page. If that file is missing, the neutral
+     fallbacks below keep the page runnable (but with no live data / wrong sun arc).
+============================================================================ -->
+<script src="dashboard-config.js" onerror="void 0"></script>
+<script>
+  window.BSF_CONFIG = Object.assign(
+    { cerboIp: "192.168.1.50", lat: -27.47, lon: 153.02, trialDays: 30,
+      gumroadUrl: "https://banksiaspringsfarm.gumroad.com/l/solar-dispatch" },
+    window.BSF_CONFIG || {}
+  );
+</script>
+</head>
+<body>
+
+  <div class="row">
+    <div>
+      <h1>☀️ Solar Dispatch <span id="siteNameSpan" style="color:var(--mut);font-weight:600">· Banksia Springs</span></h1>
+      <div class="sub">Surplus-PV dispatcher · live read-only view · <span id="updAge">connecting…</span></div>
+    </div>
+    <div class="spacer"></div>
+    <div id="connPill" class="pill connecting"><span class="dot"></span><span id="connTxt">connecting</span></div>
+  </div>
+
+  <div id="staleBanner" class="stalebanner"></div>
+
+  <!-- METRICS -->
+  <div class="card collapsible" data-card="live">
+    <h2 class="cardhdr"><span class="chev">▾</span>Live signals <span id="rawNote" style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">· raw values, shown with thresholds</span></h2>
+    <div class="cardbody"><div class="cardbody-inner">
+    <div class="metrics">
+      <div class="metric gold"><div class="k">Solar PV</div><div class="v"><span id="m_pv">–</span><span class="u">W</span></div><div class="sub2" id="m_pv_sub">DC + Fronius</div></div>
+      <div class="metric green"><div class="k">Battery SOC</div><div class="v"><span id="m_soc">–</span><span class="u">%</span></div><div class="sub2" id="m_soc_sub">&nbsp;</div></div>
+      <div class="metric cyan"><div class="k">Surplus now</div><div class="v"><span id="m_sur">–</span><span class="u">W</span></div><div class="sub2" id="m_sur_sub">PV − house</div></div>
+      <div class="metric amber"><div class="k">Hot-water draw</div><div class="v"><span id="m_hw">–</span><span class="u">W</span></div><div class="sub2" id="m_hw_sub">plug .37</div></div>
+      <div class="metric blue"><div class="k">House AC load</div><div class="v"><span id="m_ac">–</span><span class="u">W</span></div><div class="sub2" id="m_ac_sub">trailer lead</div></div>
+      <div class="metric"><div class="k">Battery flow</div><div class="v"><span id="m_batt">–</span><span class="u">W</span></div><div class="sub2" id="m_batt_sub">+chg / −dis</div></div>
+    </div>
+
+    <!-- 7-day rolling aggregates from the relay (snap.weekly) — see renderWeekly() -->
+    <div class="subhead">This week <span class="subnote" id="wk_note">rolling 7-day</span></div>
+    <div class="metrics">
+      <div class="metric green"><div class="k">Avg SOC</div><div class="v"><span id="wk_soc">–</span><span class="u">%</span></div><div class="sub2">7-day mean</div></div>
+      <div class="metric"><div class="k">Peak discharge</div><div class="v"><span id="wk_dis">–</span><span class="u">W</span></div><div class="sub2">biggest instant −draw</div></div>
+      <div class="metric"><div class="k">Min SOC</div><div class="v"><span id="wk_minsoc">–</span><span class="u">%</span></div><div class="sub2">lowest reached</div></div>
+      <div class="metric gold"><div class="k">Solar generated</div><div class="v"><span id="wk_solar">–</span><span class="u">kWh</span></div><div class="sub2">DC + Fronius</div></div>
+      <div class="metric amber"><div class="k">Hot-water run</div><div class="v"><span id="wk_hw">–</span><span class="u">h</span></div><div class="sub2" id="wk_hw_sub">– kWh</div></div>
+      <div class="metric cyan"><div class="k">Hours at 100%</div><div class="v"><span id="wk_full">–</span><span class="u">h</span></div><div class="sub2">surplus spilled</div></div>
+      <div class="metric blue"><div class="k">Air-con run</div><div class="v"><span id="wk_ac">–</span><span class="u">h</span></div><div class="sub2" id="wk_ac_sub">– kWh</div></div>
+      <div class="metric"><div class="k">Essentials</div><div class="v"><span id="wk_ess">–</span><span class="u">kWh</span></div><div class="sub2">excl. HW + A/C</div></div>
+    </div>
+
+    <!-- Curtailment summary (Phase A) — forward-tracked from the canonical MppOperationMode throttle -->
+    <div class="subhead">Curtailment <span class="subnote" id="curt_cov">tracking…</span></div>
+    <div class="curt">
+      <div class="curt-hero"><span id="curt_h">–</span><span class="cu">h</span><span class="pct" id="curt_pct"></span></div>
+      <div class="curt-fg">~<span id="curt_kwh">–</span> kWh solar foregone <span class="est" id="curt_est" title="Rough estimate. Each throttled tracker's loss = its best demonstrated uncurtailed output this week minus what it makes while limited, summed over time. Builds up once trackers run unthrottled; reads ~0 when only the low-yield BlueSolars back off.">est</span></div>
+      <div class="curt-trk" id="curt_trk"></div>
+    </div>
+    </div></div>
+  </div>
+
+  <!-- DIAGRAM -->
+  <div class="card">
+    <h2>Energy flow</h2>
+    <div id="lockBadge" class="lockbadge">LOCKOUT</div>
+    <div id="diagramWrap" class="diagram-wrap">
+      <svg class="flow" viewBox="-92 -88 452 648" xmlns="http://www.w3.org/2000/svg" aria-label="energy flow">
+        <defs>
+          <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="#ffe08a"/><stop offset=".6" stop-color="#f5b62e"/><stop offset="1" stop-color="#e08a16"/>
+          </radialGradient>
+          <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#080d18"/><stop offset="1" stop-color="#10192c"/>
+          </linearGradient>
+          <radialGradient id="moonGrad" cx="0.42" cy="0.4" r="0.62">
+            <stop offset="0" stop-color="#f4f8ff"/><stop offset=".7" stop-color="#d4deef"/><stop offset="1" stop-color="#aec3e0"/>
+          </radialGradient>
+          <radialGradient id="glowGrad" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="#f5a623" stop-opacity=".9"/><stop offset="1" stop-color="#f5a623" stop-opacity="0"/>
+          </radialGradient>
+          <radialGradient id="moonGlowGrad" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="#cfe0ff" stop-opacity=".5"/><stop offset="1" stop-color="#cfe0ff" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+
+        <!-- sky band: sun + moon ride real astronomical positions (display-only) -->
+        <g id="skyBack">
+          <rect x="-92" y="-88" width="452" height="82" fill="url(#skyGrad)"/>
+          <path id="arcSun"  class="skyarc sun"  d="" fill="none"/>
+          <path id="arcMoon" class="skyarc moon" d="" fill="none"/>
+          <line x1="-92" y1="-6" x2="360" y2="-6" stroke="#33405e" stroke-width="1.1"/>
+          <text x="-86" y="-10" class="skylbl">E</text>
+          <text x="354" y="-10" class="skylbl" text-anchor="end">W</text>
+          <ellipse id="sunGlow" cx="0" cy="-6" rx="66" ry="30" fill="url(#glowGrad)" opacity="0"/>
+        </g>
+
+        <!-- connectors -->
+        <path id="c_sun_arr" class="conn gen" d="M70 46 H100"/>
+        <path id="c_sun_fron" class="conn fron" d="M34 58 L-41 120"/>
+        <path id="c_fron_bus" class="conn fron" d="M-41 168 V268 H95"/>
+        <path id="c_arr_bat" class="conn gen" d="M180 70 V116"/>
+        <path id="c_bat_inv" class="conn" d="M180 202 V214"/>
+        <path id="c_inv_bus" class="conn" d="M180 248 V268"/>
+        <!-- AC bus split at the inverter tap (x=180): two halves light independently.
+             busL = 95↔180 (Fronius/Essential tap ↔ inverter), busR = 180↔265 (inverter ↔ HW/AC). -->
+        <path id="c_sur_ess" class="conn" d="M95 268 H180"/>
+        <path id="c_busR" class="conn" d="M180 268 H265"/>
+        <!-- essD/surD now drop from the bus THROUGH the Total AC Output tile (y286–342, drawn
+             on top → these lines are occluded inside it) and continue to the lowered sink boxes
+             (Essential / Surplus top at y368). The pass-through reads as the bus current entering
+             the Total readout and re-emerging to the loads. -->
+        <path id="c_bus_ess" class="conn" d="M95 268 V368"/>
+        <path id="c_bus_sur" class="conn" d="M265 268 V368"/>
+        <!-- shared trunk just UNDER the Surplus readout box (box bottom 418 → HW/AC branch 442).
+             BOTH load drops pass through it, so it lights on hwOn||acOn (like c_bus_sur). The two
+             branch drops START at the 442 branch point so neither overlaps/occludes this trunk
+             (previously c_sur_ac's dim line, drawn on top, hid the lit HW trunk when AC was off). -->
+        <path id="c_sur_trunk" class="conn" d="M265 418 V442"/>
+        <path id="c_sur_hw" class="conn hw" d="M265 442 H95 V476"/>
+        <path id="c_sur_ac" class="conn ac" d="M265 442 V476"/>
+
+        <!-- ============================================================
+             MOVING PARTICLES — each dot rides the exact wire SEGMENT of ONE real
+             power path and only animates (.on) while a live source→sink path carries
+             current through it, in that path's direction. The DC column is x=180
+             (Sun→MPPT→Battery→Inverter→Bus); the Fronius AC bypass runs down the left
+             (x=-41) into the bus at x=95; the AC bus (y=268) is a 3-tap node — 95
+             (Fronius/Essential), 180 (inverter), 265 (HW/AC) — split into busL+busR.
+             Segment registry + per-path trigger conditions live in render() under
+             "PHYSICAL FLOW MODEL". The "Surplus pool" box is a readout, never a source.
+             ============================================================ -->
+
+        <!-- FLOW 1 · DC PV charge: Sun → DC MPPT (180,22) → down the DC column →
+             Battery top (180,116). Sun end re-anchored live in updateSky(). -->
+        <circle id="p_gen" class="particle" r="3" fill="#f5b62e">
+          <animateMotion dur="2.2s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="linear"
+            path="M60 22 L180 22 L180 116"/>
+        </circle>
+        <circle id="p_gen2" class="particle" r="2.6" fill="#f5b62e">
+          <animateMotion dur="2.2s" begin="-1.1s" repeatCount="indefinite"
+            path="M60 22 L180 22 L180 116"/>
+        </circle>
+
+        <!-- FLOW 2 · AC PV bypass: split so neither dot is hidden plunging through
+             the Fronius box. in = Sun → Fronius (PV in); out = Fronius → AC bus. -->
+        <circle id="p_fron_in" class="particle" r="3" fill="#f5b62e">
+          <animateMotion dur="1.1s" repeatCount="indefinite" path="M34 58 L-41 120"/>
+        </circle>
+        <circle id="p_fron_out" class="particle" r="3" fill="#f5b62e">
+          <animateMotion dur="1.3s" repeatCount="indefinite" path="M-41 168 V268 H95"/>
+        </circle>
+
+        <!-- FLOW 3 · Battery discharge / DC→AC pass-through: Battery (180,202) →
+             Inverter → AC bus (180,268). DOWNWARD — direction shown by motion only
+             (flow colour is unified warm-yellow, same as every other path). -->
+        <circle id="p_dis" class="particle" r="3" fill="#f5b62e">
+          <animateMotion dur="1.5s" repeatCount="indefinite" path="M180 202 V268"/>
+        </circle>
+        <circle id="p_dis2" class="particle" r="2.6" fill="#f5b62e">
+          <animateMotion dur="1.5s" begin="-0.75s" repeatCount="indefinite" path="M180 202 V268"/>
+        </circle>
+
+        <!-- FLOW 4 · AC-surplus reverse charge: AC bus (180,268) → Inverter →
+             Battery (180,202). UPWARD — direction shown by motion only (flow colour is
+             unified warm-yellow; the upward travel is what marks it as charging). -->
+        <circle id="p_chg_ac" class="particle" r="3" fill="#f5b62e">
+          <animateMotion dur="1.5s" repeatCount="indefinite" path="M180 268 V202"/>
+        </circle>
+
+        <!-- FLOW 5 · Essential household load: AC bus (95,268) → Essential box. -->
+        <circle id="p_ess" class="particle" r="2.8" fill="#f5b62e">
+          <animateMotion dur="2.4s" repeatCount="indefinite" path="M95 268 V368"/>
+        </circle>
+
+        <!-- AC-BUS PARTICLES — the bus is a 3-tap node: LEFT 95 (Fronius-in + Essential-out),
+             MID 180 (inverter in/out), RIGHT 265 (HW/AC distribution). It splits at the inverter
+             tap so each half carries its OWN current/direction (see render() → "AC BUS segments").
+             busL is genuinely bidirectional (battery→essentials leftward, OR Fronius→inverter/loads
+             rightward) so it has one dot per direction; busR always runs MID→RIGHT toward the
+             HW/AC sink. The "Surplus pool" box is a READOUT, never a source — no dot emanates FROM
+             it; p_bus_sur feeds INTO the distribution past it. Direction is read from motion only. -->
+        <circle id="p_busL_r" class="particle" r="2.8" fill="#f5b62e">
+          <animateMotion dur="1.6s" repeatCount="indefinite" path="M95 268 L180 268"/>
+        </circle>
+        <circle id="p_busL_l" class="particle" r="2.8" fill="#f5b62e">
+          <animateMotion dur="1.6s" repeatCount="indefinite" path="M180 268 L95 268"/>
+        </circle>
+        <circle id="p_busR" class="particle" r="2.8" fill="#f5b62e">
+          <animateMotion dur="1.6s" repeatCount="indefinite" path="M180 268 L265 268"/>
+        </circle>
+        <circle id="p_bus_sur" class="particle" r="2.8" fill="#f5b62e">
+          <animateMotion dur="1.9s" repeatCount="indefinite" path="M265 268 V368"/>
+        </circle>
+        <!-- shared trunk under the Surplus readout box (418→442) — the HW+AC feed before the branch. -->
+        <circle id="p_sur_trunk" class="particle" r="2.8" fill="#f5b62e">
+          <animateMotion dur="1.2s" repeatCount="indefinite" path="M265 418 V442"/>
+        </circle>
+
+        <!-- FLOW 6 · Hot water: branch (265,442) → left → Hot-water box (the trunk above feeds it). -->
+        <circle id="p_hw" class="particle" r="3" fill="#f5b62e">
+          <animateMotion dur="1.6s" repeatCount="indefinite" path="M265 442 H95 V476"/>
+        </circle>
+        <!-- FLOW 7 · Air-con: branch (265,442) → down → Air-con box. -->
+        <circle id="p_ac" class="particle" r="3" fill="#f5b62e">
+          <animateMotion dur="1.4s" repeatCount="indefinite" path="M265 442 V476"/>
+        </circle>
+
+        <!-- moon — rides its own arc; phase = computed terminator (SunCalc illumination).
+             Drawn BEFORE the sun so that when the two coincide (e.g. a daytime new moon)
+             the bright sun disk renders on top — never the moon's dark disk, which used to
+             show as a "black dot" sitting on the sun. -->
+        <g id="moonBody" style="display:none">
+          <circle r="20" fill="url(#moonGlowGrad)"/>
+          <circle r="12" fill="#1b2335"/>
+          <path id="moonLit" d="" fill="url(#moonGrad)"/>
+          <circle r="12" fill="none" stroke="#46577a" stroke-width="0.8"/>
+        </g>
+        <!-- sun — rides the horizon arc; rays re-anchor to its live position (updateSky).
+             Drawn AFTER the moon so the sun is always on top when they overlap. -->
+        <g id="sunBody" style="display:none">
+          <circle r="13" fill="url(#sun)"/>
+          <g stroke="#f5b62e" stroke-width="2.2" stroke-linecap="round" opacity=".92">
+            <line x1="16.5" y1="0" x2="24" y2="0"/><line x1="-16.5" y1="0" x2="-24" y2="0"/>
+            <line x1="0" y1="16.5" x2="0" y2="24"/><line x1="0" y1="-16.5" x2="0" y2="-24"/>
+            <line x1="11.7" y1="11.7" x2="17" y2="17"/><line x1="-11.7" y1="-11.7" x2="-17" y2="-17"/>
+            <line x1="11.7" y1="-11.7" x2="17" y2="-17"/><line x1="-11.7" y1="11.7" x2="-17" y2="17"/>
+          </g>
+        </g>
+
+        <!-- Total Solar tile (top-left gutter) — sun has no box, so it gets a labelled
+             source box (pv_total = DC + Fronius). Tappable → same history card as the sun. -->
+        <g class="tappable" id="totSolarBox">
+          <rect class="src-box" x="-90" y="22" width="104" height="42" rx="9"/>
+          <text class="node-label" x="-38" y="37" text-anchor="middle" fill="#d9b65a">Total Solar</text>
+          <text class="node-val" id="d_totsolar" x="-38" y="54" text-anchor="middle" font-size="13" fill="#ffd87a">– W</text>
+        </g>
+
+        <!-- DC MPPT box (was 'Solar array'); tappable for per-charger drill-down -->
+        <g class="tappable" id="mpptBox" onclick="toggleDrill()">
+          <rect class="src-box" x="100" y="22" width="160" height="48" rx="9"/>
+          <text class="node-label" x="180" y="37" text-anchor="middle" fill="#d9b65a">DC MPPT · 4 chargers</text>
+          <text class="node-val" id="d_pv" x="170" y="56" text-anchor="middle" fill="#ffd87a">– W</text>
+          <circle id="mppt_throt" class="throtdot" cx="247" cy="34" r="4"/>
+        </g>
+
+        <!-- NEW: Fronius (AC-coupled) box — bypasses the battery, feeds the AC bus -->
+        <rect class="src-box" x="-80" y="122" width="78" height="46" rx="9"/>
+        <text class="node-label" x="-41" y="138" text-anchor="middle" fill="#d9b65a">Fronius · AC</text>
+        <text class="node-val" id="d_fron" x="-41" y="156" text-anchor="middle" font-size="12" fill="#ffd87a">– W</text>
+        <text class="node-sub" x="-41" y="165" text-anchor="middle">bypasses battery</text>
+
+        <!-- battery -->
+        <rect class="node-box" x="90" y="116" width="180" height="86" rx="11"/>
+        <text class="node-label" x="180" y="133" text-anchor="middle">Battery bank</text>
+        <g transform="translate(132 159)">
+          <circle class="socring-bg" r="26" cx="0" cy="0"/>
+          <circle id="socRing" class="socring-fg" r="26" cx="0" cy="0" transform="rotate(-90)"
+            stroke-dasharray="163.4" stroke-dashoffset="163.4"/>
+          <text id="d_soc" x="0" y="5" text-anchor="middle" fill="#e8eef8" font-size="16" font-weight="700">–</text>
+        </g>
+        <text class="node-label" x="216" y="156" text-anchor="middle">flow</text>
+        <text class="node-val" id="d_batt" x="216" y="176" text-anchor="middle" font-size="13">– W</text>
+        <text class="node-sub" id="d_batt2" x="216" y="190" text-anchor="middle">&nbsp;</text>
+
+        <!-- inverter (minimal bidirectional cue: ↑ chg / ↓ load, by batt_power sign) -->
+        <rect class="node-box" x="138" y="214" width="84" height="34" rx="8"/>
+        <!-- Multi RS does BOTH: inverter (DC→AC forward) AND charger (AC→DC on reverse-charge).
+             Stacked label so both functions are visible: Inverter / ∿ / Charger. -->
+        <text class="node-label" x="180" y="223" text-anchor="middle" font-size="7.5">Inverter</text>
+        <path d="M163 232 q8.5 -5 17 0 t17 0" fill="none" stroke="#38bdf8" stroke-width="1.8"/>
+        <text class="node-label" x="180" y="245" text-anchor="middle" font-size="7.5">Charger</text>
+        <text id="inv_cue" x="232" y="234" text-anchor="start" font-size="9" font-weight="800" fill="#34d399"></text>
+
+        <!-- ============================================================
+             TOTAL AC OUTPUT (reconciliation) — the AC bus aggregate. Fronius (measured) +
+             inverter DC→AC (derived: there is NO measured inverter-AC field) feed the bus;
+             this band sums them and cross-checks that the total equals where the AC goes:
+             Essential + HW + A/C + AC-surplus(→battery). Δ≈0 by construction → it only
+             departs when the load attribution is inconsistent (stale/biased plug), which is
+             the visible check Steven wanted. surplus_now (DC+AC) is UNTOUCHED in its own
+             "Surplus Power" readout below — the AC-only surplus here is the smaller number.
+             The essD/surD bus drops pass THROUGH this band (occluded here, re-emerge below).
+             READOUT ONLY — display math; dispatcher / relay / surplus_now untouched. -->
+        <rect id="totac_box" class="totac-box" x="36" y="286" width="288" height="56" rx="10"/>
+        <text class="node-label" x="48" y="303" text-anchor="start" style="fill:#cfe0ff">Total AC Output</text>
+        <text id="d_totac_chk" x="312" y="303" text-anchor="end" font-size="9.5" font-weight="800" fill="#34d399">–</text>
+        <text class="node-val" id="d_totac" x="48" y="329" text-anchor="start" font-size="17" fill="#eaf2ff">– W</text>
+        <text class="node-sub" id="d_totac_src" x="312" y="329" text-anchor="end" style="fill:#9fb4d6">Fronius – + Inv –</text>
+
+        <!-- essential (moved down +82 to make room for the Total AC Output band) -->
+        <rect class="node-box" x="30" y="368" width="130" height="48" rx="9"/>
+        <text class="node-label" x="95" y="384" text-anchor="middle">Essential AC Loads</text>
+        <text class="node-val" id="d_ess" x="95" y="404" text-anchor="middle" font-size="13">– W</text>
+        <text id="essWarn" x="95" y="430" text-anchor="middle" font-size="9" fill="#f0b364" style="display:none"></text>
+
+        <!-- surplus (moved down +82) -->
+        <rect x="200" y="368" width="130" height="48" rx="9" fill="#0e3a52" stroke="#2f7d96"/>
+        <text class="node-label" x="265" y="384" text-anchor="middle" style="fill:#7fdcff">Surplus Power</text>
+        <text class="node-val" id="d_sur" x="265" y="404" text-anchor="middle" font-size="13" style="fill:#bfe9ff">– W</text>
+
+        <!-- HW load (moved down +82) -->
+        <rect id="load_hw" class="loadbox hw" x="30" y="476" width="130" height="56" rx="9"/>
+        <text class="node-label" x="95" y="493" text-anchor="middle">🔥💧 Hot water</text>
+        <text class="node-val" id="d_hw" x="78" y="513" text-anchor="middle" font-size="13">– W</text>
+        <text id="b_hw" class="onbadge hw" x="128" y="513" text-anchor="end">OFF</text>
+        <text class="node-sub" x="95" y="526" text-anchor="middle">1.6 kW element</text>
+
+        <!-- AC load (moved down +82) -->
+        <rect id="load_ac" class="loadbox ac" x="200" y="476" width="130" height="56" rx="9"/>
+        <text class="node-label" x="265" y="493" text-anchor="middle">🌡️ Air-con</text>
+        <text class="node-val" id="d_ac" x="248" y="513" text-anchor="middle" font-size="13">– W</text>
+        <text id="b_ac" class="onbadge ac" x="298" y="513" text-anchor="end">OFF</text>
+        <text class="node-sub" x="265" y="526" text-anchor="middle">Daikin FTXZ25</text>
+
+        <!-- transparent tap-targets (Phase C): tap a node → time-series detail card.
+             On top of the boxes so the whole tile is the hit area. -->
+        <g>
+          <rect class="node-tap" x="-92" y="20" width="108" height="46" fill="transparent" pointer-events="all" onclick="openDetail('sun')"><title>Total solar — tap for history</title></rect>
+          <rect class="node-tap" x="100" y="22" width="160" height="48" fill="transparent" pointer-events="all" onclick="openDetail('dc')"><title>DC MPPT — tap for history</title></rect>
+          <rect class="node-tap" x="-80" y="122" width="78" height="46" fill="transparent" pointer-events="all" onclick="openDetail('fron')"><title>Fronius — tap for history</title></rect>
+          <rect class="node-tap" x="90" y="116" width="180" height="86" fill="transparent" pointer-events="all" onclick="openDetail('batt')"><title>Battery — tap for history</title></rect>
+          <rect class="node-tap" x="30" y="368" width="130" height="48" fill="transparent" pointer-events="all" onclick="openDetail('ess')"><title>Household load — tap for history</title></rect>
+          <rect class="node-tap" x="200" y="368" width="130" height="48" fill="transparent" pointer-events="all" onclick="openDetail('sur')"><title>Surplus — tap for history</title></rect>
+          <rect class="node-tap" x="30" y="476" width="130" height="56" fill="transparent" pointer-events="all" onclick="openDetail('hw')"><title>Hot water — tap for history</title></rect>
+          <rect class="node-tap" x="200" y="476" width="130" height="56" fill="transparent" pointer-events="all" onclick="openDetail('ac')"><title>Air-con — tap for history</title></rect>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Node detail modal (Phase C): time-series with Live/Day/Week/Month/Year picker -->
+    <div id="detail" class="detail" style="display:none" onclick="if(event.target===this)closeDetail()">
+      <div class="detail-card">
+        <div class="detail-head">
+          <span class="detail-ic" id="dt_ic">☀️</span>
+          <div><div class="detail-title" id="dt_title">Node</div><div class="detail-sub" id="dt_sub"></div></div>
+          <span class="detail-x" onclick="closeDetail()">✕ close</span>
+        </div>
+        <div class="detail-res" id="dt_res"></div>
+        <div class="detail-chartwrap">
+          <svg id="dt_chart" class="detail-chart" viewBox="0 0 350 184" preserveAspectRatio="xMidYMid meet" aria-label="detail chart"></svg>
+        </div>
+        <div class="detail-legend" id="dt_legend"></div>
+        <div class="detail-pc" id="dt_pc" style="display:none"></div>
+        <div class="detail-tiles" id="dt_tiles"></div>
+        <div class="detail-note" id="dt_note"></div>
+      </div>
+    </div>
+    <!-- DC MPPT drill-down (tap the DC MPPT box) — per-charger + throttling signal -->
+    <div id="drill" class="drill">
+      <div class="drillcard">
+        <div class="drillhead">
+          <span class="nm">DC MPPT — per-charger</span>
+          <span class="cl" onclick="toggleDrill()">close ✕</span>
+        </div>
+        <div class="chrow"><span class="pill mppt">MPPT</span><span class="cn">MPPT-288</span><span class="ct" id="dd_288">—</span></div>
+        <div class="chrow"><span class="pill mppt">MPPT</span><span class="cn">MPPT-289</span><span class="ct" id="dd_289">—</span></div>
+        <div class="chrow"><span class="pill rs">RS</span><span class="cn">RS Solar 1</span><span class="ct" id="dd_rs1">—</span></div>
+        <div class="chrow"><span class="pill rs">RS</span><span class="cn">RS Solar 2</span><span class="ct" id="dd_rs2">—</span></div>
+        <div id="throtbar" class="throtbar">…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIME MACHINE — sits right under the Energy Flow diagram so the scrub control is
+       next to the sky band it drives, above the HW/AC tile rows. Default COLLAPSED so the
+       slider can't be scrubbed by accident — the user taps the header to open it. -->
+  <div class="card collapsible" data-card="tm" data-collapsed="1">
+    <h2 class="cardhdr"><span class="chev">▾</span>Time machine</h2>
+    <div class="cardbody"><div class="cardbody-inner">
+    <div class="tm-top">
+      <button id="liveBtn" class="btn active">● LIVE</button>
+      <span class="tm-time" id="tmTime">live</span>
+      <span class="spacer"></span>
+      <span class="tm-time" id="tmState" style="color:var(--mut);font-weight:600"></span>
+    </div>
+    <input type="range" id="tmSlider" min="0" max="0" value="0" step="1">
+    <div class="tm-note" id="tmNote">Scrubbing replays real status samples captured since this dashboard first ran.</div>
+    </div></div>
+  </div>
+
+  <!-- HOT WATER GATES -->
+  <div class="card collapsible" data-card="hw">
+    <div class="gatehead"><span class="chev">▾</span><span class="ic">💧</span><span class="nm">Hot Water — v3+</span><span id="hwState" class="st off">OFF</span></div>
+    <div class="cardbody"><div class="cardbody-inner">
+    <div class="gates" id="hwGates"></div>
+    </div></div>
+  </div>
+
+  <!-- AC threshold control styles (the one write surface on this page) -->
+  <style>
+  .acctl{margin-top:10px;background:var(--card2);border:1px solid var(--line);border-radius:var(--rs);padding:11px}
+  .acctl-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 8px;margin-bottom:8px}
+  .acctl-title{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--amber);font-weight:700}
+  .acctl-live{font-size:11.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .acctl-live b{color:var(--ink);font-weight:700}
+  .acctl-band{position:relative;height:8px;border-radius:5px;margin:2px 4px 6px;background:linear-gradient(90deg,#16314a 0%,#1d2c3a 45%,#2a1c10 100%);border:1px solid var(--line)}
+  .acctl-zone{position:absolute;top:0;bottom:0;background:rgba(240,179,100,.22);border-left:2px solid var(--amber);border-right:2px solid var(--amber)}
+  .acctl-dot{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:var(--ink);border:2px solid var(--bg);box-shadow:0 0 6px rgba(232,238,248,.7);transform:translateX(-6px)}
+  .acctl-scale{display:flex;justify-content:space-between;font-size:9.5px;color:var(--dim);margin:0 2px 9px;font-variant-numeric:tabular-nums}
+  .acctl-steppers{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .acctl-step{background:var(--card);border:1px solid var(--line);border-radius:var(--rs);padding:8px 4px;text-align:center;min-width:0}
+  .acctl-lbl{font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.2px;margin-bottom:7px;min-height:26px;display:flex;align-items:center;justify-content:center;line-height:1.25}
+  .acctl-row{display:flex;align-items:center;justify-content:center;gap:4px}
+  .acctl-btn{width:36px;height:36px;flex:0 0 auto;border-radius:10px;border:1px solid var(--line);background:var(--card2);color:var(--ink);font-size:20px;font-weight:700;line-height:1;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;display:flex;align-items:center;justify-content:center;padding:0}
+  .acctl-btn:active{background:var(--greenDim);border-color:var(--okbd)}
+  .acctl-btn:disabled{opacity:.32;cursor:not-allowed}
+  .acctl-val{font-size:20px;font-weight:800;color:var(--amber);font-variant-numeric:tabular-nums;min-width:46px}
+  .acctl-foot{margin-top:11px}
+  .acctl-pending{display:none;font-size:11.5px;color:var(--amber);background:#2a1c10;border:1px solid #4a3410;border-radius:7px;padding:6px 8px;margin-bottom:8px;text-align:center}
+  .acctl.dirty .acctl-pending{display:block}
+  .acctl-actions{display:flex;gap:8px}
+  .acctl-save{flex:1;height:42px;border-radius:10px;border:1px solid var(--okbd);background:var(--greenDim);color:var(--green);font-size:14px;font-weight:700;cursor:pointer;touch-action:manipulation}
+  .acctl-save:disabled{opacity:1;cursor:not-allowed;background:var(--card2);border-color:var(--line);color:var(--dim)}
+  .acctl-cancel{height:42px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:var(--card2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer}
+  .acctl-confirm{display:none;gap:8px;align-items:center;background:#2a1c10;border:1px solid #4a3410;border-radius:8px;padding:8px}
+  .acctl.confirming .acctl-confirm{display:flex}
+  .acctl.confirming .acctl-actions{display:none}
+  .acctl-confirm span{flex:1;font-size:11.5px;color:var(--ink);line-height:1.3}
+  .acctl-apply{height:38px;padding:0 13px;border-radius:9px;border:1px solid var(--okbd);background:var(--greenDim);color:var(--green);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+  .acctl-no{height:38px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:var(--card2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer}
+  .acctl-last{font-size:11px;color:var(--dim);margin-top:9px;text-align:center;font-variant-numeric:tabular-nums}
+  .acctl-note{font-size:11px;color:var(--amber);margin-top:6px;text-align:center;display:none;line-height:1.35}
+  .acctl.locked .acctl-step,.acctl.locked .acctl-band,.acctl.locked .acctl-scale{opacity:.55}
+
+  /* ===== v1.11 presence-aware AC: AUTO/ON/OFF mode switch + presence list + MAC registration ===== */
+  .acmode{margin-top:10px;background:var(--card2);border:1px solid var(--line);border-radius:var(--rs);padding:11px}
+  .acmode-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 8px;margin-bottom:8px}
+  .acmode-title{font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--amber);font-weight:700}
+  .acmode-sub{font-size:11.5px;color:var(--mut)}
+  .acmode-sub b{color:var(--ink);font-weight:700}
+  .acmode-seg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .acmode-btn{height:48px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--mut);font-size:14px;font-weight:800;letter-spacing:.4px;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1;padding:0 2px}
+  .acmode-btn .sub{font-size:8.5px;font-weight:600;letter-spacing:.1px;color:var(--dim);text-transform:none}
+  .acmode-btn:disabled{cursor:not-allowed}
+  .acmode-btn.active[data-mode="AUTO"]{background:var(--greenDim);border-color:var(--okbd);color:var(--green)}
+  .acmode-btn.active[data-mode="AUTO"] .sub{color:var(--green)}
+  .acmode-btn.active[data-mode="ON"]{background:#2a1c10;border-color:#7a5a18;color:var(--gold)}
+  .acmode-btn.active[data-mode="ON"] .sub{color:var(--gold)}
+  .acmode-btn.active[data-mode="OFF"]{background:var(--redDim);border-color:var(--nobd);color:#ff8a8a}
+  .acmode-btn.active[data-mode="OFF"] .sub{color:#ff8a8a}
+  .acmode-btn.pending{opacity:.6}
+  .acmode-note{font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;text-align:center}
+  .acmode.locked .acmode-btn:not(.active){opacity:.5}
+
+  .presence{margin-top:9px;border-top:1px solid var(--line);padding-top:4px}
+  .presence-row{display:flex;align-items:center;gap:9px;padding:8px 2px;border-bottom:1px solid var(--line)}
+  .presence-row:last-child{border-bottom:none}
+  .presence-dot{width:10px;height:10px;border-radius:50%;background:var(--dim);flex:0 0 auto}
+  .presence-dot.home{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .presence-dot.empty{background:transparent;border:1.5px dashed var(--dim)}
+  .presence-name{font-weight:700;font-size:13px;color:var(--ink)}
+  .presence-name .tag{font-weight:600;font-size:10px;color:var(--dim);margin-left:5px}
+  .presence-meta{font-size:11px;color:var(--dim);margin-left:auto;text-align:right;font-variant-numeric:tabular-nums;line-height:1.3}
+  .presence-meta b{color:var(--green);font-weight:700}
+  .presence-reg{margin-left:8px;height:30px;padding:0 11px;border-radius:8px;border:1px solid var(--okbd);background:var(--greenDim);color:var(--green);font-size:11.5px;font-weight:700;cursor:pointer;white-space:nowrap;touch-action:manipulation;flex:0 0 auto}
+  .presence-reg.change{border-color:var(--line);background:var(--card2);color:var(--mut)}
+  .presence-reg:disabled{opacity:.4;cursor:not-allowed;border-color:var(--line);background:var(--card2);color:var(--dim)}
+
+  .cand{margin-top:9px;background:var(--card);border:1px solid var(--okbd);border-radius:var(--rs);padding:10px;display:none}
+  .cand.show{display:block}
+  .cand-hd{font-size:11.5px;color:var(--mut);margin-bottom:8px;line-height:1.4}
+  .cand-hd b{color:var(--ink)}
+  .cand-row{display:flex;align-items:center;gap:9px;padding:9px 8px;margin-bottom:6px;border:1px solid var(--line);border-radius:8px;background:var(--card2);cursor:pointer;touch-action:manipulation}
+  .cand-row.phone{border-color:var(--okbd);background:var(--greenDim)}
+  .cand-row:active{background:var(--greenDim)}
+  .cand-ic{font-size:17px;flex:0 0 auto}
+  .cand-main{min-width:0;flex:1}
+  .cand-mac{font-size:12.5px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .cand-vend{font-size:10.5px;color:var(--dim);margin-top:1px}
+  .cand-meta{font-size:10px;color:var(--dim);text-align:right;white-space:nowrap;flex:0 0 auto}
+  .cand-actions{display:flex;gap:8px;margin-top:4px}
+  .cand-rescan,.cand-close{flex:1;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--card2);color:var(--mut);font-size:12px;font-weight:600;cursor:pointer;touch-action:manipulation}
+  .cand-empty{font-size:11.5px;color:var(--dim);text-align:center;padding:10px;line-height:1.45}
+  </style>
+
+  <!-- AC GATES -->
+  <div class="card collapsible" data-card="ac">
+    <div class="gatehead"><span class="chev">▾</span><span class="ic">🌡️</span><span class="nm" id="acCardTitle">Air-Con — v1.11 (presence-aware heating)</span><span id="acState" class="st off">OFF</span></div>
+    <div class="cardbody"><div class="cardbody-inner">
+    <div class="gates" id="acGates"></div>
+
+    <!-- ===== v1.11 mode switch (AUTO/ON/OFF) + presence list + MAC registration — LAN-only write ===== -->
+    <div class="acmode locked" id="acMode">
+      <div class="acmode-head">
+        <span class="acmode-title">Mode</span>
+        <span class="acmode-sub" id="acModeSub">–</span>
+      </div>
+      <div class="acmode-seg">
+        <button class="acmode-btn" data-mode="AUTO" id="acModeAUTO" onclick="acSetMode('AUTO')">AUTO<span class="sub">home &amp; cold</span></button>
+        <button class="acmode-btn" data-mode="ON"   id="acModeON"   onclick="acSetMode('ON')">ON<span class="sub">cold, ignore presence</span></button>
+        <button class="acmode-btn" data-mode="OFF"  id="acModeOFF"  onclick="acSetMode('OFF')">OFF<span class="sub" id="acOffSub">never heat</span></button>
+      </div>
+      <div class="acmode-note" id="acModeNote"></div>
+
+      <!-- presence list -->
+      <div class="presence" id="presenceList"></div>
+
+      <!-- MAC registration overlay -->
+      <div class="cand" id="candBox">
+        <div class="cand-hd" id="candHd"></div>
+        <div id="candRows"></div>
+        <div class="cand-actions">
+          <button class="cand-rescan" onclick="acRescan()">Rescan</button>
+          <button class="cand-close" onclick="acCloseCand()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== AC heating-threshold control (LAN-only write surface) ===== -->
+    <div class="acctl locked" id="acCtl">
+      <div class="acctl-head">
+        <span class="acctl-title" id="acSetpointTitle">Heating setpoints — tune</span>
+        <span class="acctl-live" id="acCtlLive">–</span>
+      </div>
+      <div class="acctl-band" id="acBand">
+        <div class="acctl-zone" id="acZone"></div>
+        <div class="acctl-dot" id="acDot" style="display:none"></div>
+      </div>
+      <div class="acctl-scale"><span>14°</span><span>house holds in the band</span><span>28°</span></div>
+      <div class="acctl-steppers">
+        <div class="acctl-step">
+          <div class="acctl-lbl">Turns ON<br>heat below</div>
+          <div class="acctl-row">
+            <button class="acctl-btn" id="acOnMinus" onclick="acStep('on',-0.5)" aria-label="lower ON">–</button>
+            <span class="acctl-val" id="acOnVal">–</span>
+            <button class="acctl-btn" id="acOnPlus" onclick="acStep('on',0.5)" aria-label="raise ON">+</button>
+          </div>
+        </div>
+        <div class="acctl-step">
+          <div class="acctl-lbl">Turns OFF<br>stops at</div>
+          <div class="acctl-row">
+            <button class="acctl-btn" id="acOffMinus" onclick="acStep('off',-0.5)" aria-label="lower OFF">–</button>
+            <span class="acctl-val" id="acOffVal">–</span>
+            <button class="acctl-btn" id="acOffPlus" onclick="acStep('off',0.5)" aria-label="raise OFF">+</button>
+          </div>
+        </div>
+      </div>
+      <div class="acctl-foot">
+        <div class="acctl-pending" id="acPending">Pending — tap Save to apply</div>
+        <div class="acctl-actions" id="acActions">
+          <button class="acctl-save" id="acSaveBtn" onclick="acSaveClick()" disabled>Save</button>
+          <button class="acctl-cancel" id="acCancelBtn" onclick="acCancel()">Reset</button>
+        </div>
+        <div class="acctl-confirm" id="acConfirm">
+          <span id="acConfirmTxt">Apply?</span>
+          <button class="acctl-apply" onclick="acApply()">Yes, apply</button>
+          <button class="acctl-no" onclick="acCancel()">No</button>
+        </div>
+        <div class="acctl-last" id="acLast">–</div>
+        <div class="acctl-note" id="acNote"></div>
+      </div>
+    </div>
+
+    </div></div>
+  </div>
+
+  <!-- HISTORY -->
+  <div class="card">
+    <h2>Dispatch history · last 24 h</h2>
+    <div class="hist" id="hist"><div class="empty">Waiting for the first samples… load transitions and anomalies will appear here.</div></div>
+  </div>
+
+  <footer>
+    <div><b>Data source:</b> <span id="srcLine">connecting…</span> Read-only with <b>one</b> exception — from the farm network you can adjust the AC heating ON/OFF setpoints (validated server-side). It still cannot flip any switch directly.</div>
+    <div style="margin-top:6px"><b>Honesty:</b> all numbers are raw dispatcher signals shown with their thresholds. When a feed is stale or a field is missing, you'll see a badge — never a guessed value. History is built from real samples — the farm relay keeps a rolling 24 h, and on the farm network the page also accrues its own. The Node-RED archive endpoints (<span class="mono">/api/bsf/*</span>) aren't wired, so there's no deeper backfill than that.</div>
+    <div style="margin-top:6px;color:var(--dim)">Banksia Springs Farm · Solar Dispatch dashboard · companion to <span class="mono">schematic_energy_flow.svg</span> &amp; <span class="mono">dispatcher_logic.md</span>.</div>
+  </footer>
+
+<script>
+/* ============================================================
+   SunCalc 1.9.0 — github.com/mourner/suncalc (BSD-2-Clause, Vladimir Agafonkin)
+   VENDORED INLINE (no CDN): the /solar public route serves a single
+   self-contained HTML file, so the library is embedded rather than linked.
+   Unmodified except: ESM `export` keywords stripped + window.SunCalc shim.
+   ============================================================ */
+(function(){
+"use strict";
+
+// shortcuts for easier to read formulas
+
+const PI   = Math.PI,
+    sin  = Math.sin,
+    cos  = Math.cos,
+    tan  = Math.tan,
+    asin = Math.asin,
+    atan = Math.atan2,
+    acos = Math.acos,
+    rad  = PI / 180;
+
+// sun calculations are based on https://aa.quae.nl/en/reken/zonpositie.html formulas
+
+// date/time constants and conversions
+
+const dayMs = 1000 * 60 * 60 * 24,
+    J1970 = 2440588,
+    J2000 = 2451545;
+
+function toJulian(date) { return date.valueOf() / dayMs - 0.5 + J1970; }
+function fromJulian(j)  { return new Date((j + 0.5 - J1970) * dayMs); }
+function toDays(date)   { return toJulian(date) - J2000; }
+
+
+// general calculations for position
+
+const e = rad * 23.4397; // obliquity of the Earth
+
+function rightAscension(l, b) { return atan(sin(l) * cos(e) - tan(b) * sin(e), cos(l)); }
+function declination(l, b)    { return asin(sin(b) * cos(e) + cos(b) * sin(e) * sin(l)); }
+
+function azimuth(H, phi, dec)  { return atan(sin(H), cos(H) * sin(phi) - tan(dec) * cos(phi)); }
+function altitude(H, phi, dec) { return asin(sin(phi) * sin(dec) + cos(phi) * cos(dec) * cos(H)); }
+
+function siderealTime(d, lw) { return rad * (280.16 + 360.9856235 * d) - lw; }
+
+function astroRefraction(h) {
+    if (h < 0) // the following formula works for positive altitudes only.
+        h = 0; // if h = -0.08901179 a div/0 would occur.
+
+    // formula 16.4 of "Astronomical Algorithms" 2nd edition by Jean Meeus (Willmann-Bell, Richmond) 1998.
+    // 1.02 / tan(h + 10.26 / (h + 5.10)) h in degrees, result in arc minutes -> converted to rad:
+    return 0.0002967 / Math.tan(h + 0.00312536 / (h + 0.08901179));
+}
+
+// general sun calculations
+
+function solarMeanAnomaly(d) { return rad * (357.5291 + 0.98560028 * d); }
+
+function eclipticLongitude(M) {
+
+    const C = rad * (1.9148 * sin(M) + 0.02 * sin(2 * M) + 0.0003 * sin(3 * M)), // equation of center
+        P = rad * 102.9372; // perihelion of the Earth
+
+    return M + C + P + PI;
+}
+
+function sunCoords(d) {
+
+    const M = solarMeanAnomaly(d),
+        L = eclipticLongitude(M);
+
+    return {
+        dec: declination(L, 0),
+        ra: rightAscension(L, 0)
+    };
+}
+
+
+// calculates sun position for a given date and latitude/longitude
+
+function getPosition(date, lat, lng) {
+
+    const lw  = rad * -lng,
+        phi = rad * lat,
+        d   = toDays(date),
+
+        c  = sunCoords(d),
+        H  = siderealTime(d, lw) - c.ra;
+
+    return {
+        azimuth: azimuth(H, phi, c.dec),
+        altitude: altitude(H, phi, c.dec)
+    };
+};
+
+
+// sun times configuration (angle, morning name, evening name)
+
+const times = [
+    [-0.833, 'sunrise', 'sunset'],
+    [-0.3, 'sunriseEnd', 'sunsetStart'],
+    [-6, 'dawn', 'dusk'],
+    [-12, 'nauticalDawn', 'nauticalDusk'],
+    [-18, 'nightEnd', 'night'],
+    [6, 'goldenHourEnd', 'goldenHour']
+];
+
+// adds a custom time to the times config
+
+function addTime(angle, riseName, setName) {
+    times.push([angle, riseName, setName]);
+};
+
+
+// calculations for sun times
+
+const J0 = 0.0009;
+
+function julianCycle(d, lw) { return Math.round(d - J0 - lw / (2 * PI)); }
+
+function approxTransit(Ht, lw, n) { return J0 + (Ht + lw) / (2 * PI) + n; }
+function solarTransitJ(ds, M, L)  { return J2000 + ds + 0.0053 * sin(M) - 0.0069 * sin(2 * L); }
+
+function hourAngle(h, phi, d) { return acos((sin(h) - sin(phi) * sin(d)) / (cos(phi) * cos(d))); }
+function observerAngle(height) { return -2.076 * Math.sqrt(height) / 60; }
+
+// returns set time for the given sun altitude
+function getSetJ(h, lw, phi, dec, n, M, L) {
+
+    const w = hourAngle(h, phi, dec),
+        a = approxTransit(w, lw, n);
+    return solarTransitJ(a, M, L);
+}
+
+
+// calculates sun times for a given date, latitude/longitude, and, optionally,
+// the observer height (in meters) relative to the horizon
+
+function getTimes(date, lat, lng, height) {
+
+    height = height || 0;
+
+    const lw = rad * -lng,
+        phi = rad * lat,
+        dh = observerAngle(height),
+        d = toDays(date),
+        n = julianCycle(d, lw),
+        ds = approxTransit(0, lw, n),
+        M = solarMeanAnomaly(ds),
+        L = eclipticLongitude(M),
+        dec = declination(L, 0),
+        Jnoon = solarTransitJ(ds, M, L);
+
+    const result = {
+        solarNoon: fromJulian(Jnoon),
+        nadir: fromJulian(Jnoon - 0.5)
+    };
+
+    for (const time of times) {
+        const h0 = (time[0] + dh) * rad;
+        const Jset = getSetJ(h0, lw, phi, dec, n, M, L);
+        const Jrise = Jnoon - (Jset - Jnoon);
+
+        result[time[1]] = fromJulian(Jrise);
+        result[time[2]] = fromJulian(Jset);
+    }
+
+    return result;
+};
+
+
+// moon calculations, based on http://aa.quae.nl/en/reken/hemelpositie.html formulas
+
+function moonCoords(d) { // geocentric ecliptic coordinates of the moon
+
+    const L = rad * (218.316 + 13.176396 * d), // ecliptic longitude
+        M = rad * (134.963 + 13.064993 * d), // mean anomaly
+        F = rad * (93.272 + 13.229350 * d),  // mean distance
+
+        l  = L + rad * 6.289 * sin(M), // longitude
+        b  = rad * 5.128 * sin(F),     // latitude
+        dt = 385001 - 20905 * cos(M);  // distance to the moon in km
+
+    return {
+        ra: rightAscension(l, b),
+        dec: declination(l, b),
+        dist: dt
+    };
+}
+
+function getMoonPosition(date, lat, lng) {
+
+    const lw = rad * -lng,
+        phi = rad * lat,
+        d = toDays(date),
+        c = moonCoords(d),
+        H = siderealTime(d, lw) - c.ra,
+        h = altitude(H, phi, c.dec),
+        // formula 14.1 of "Astronomical Algorithms" 2nd edition by Jean Meeus (Willmann-Bell, Richmond) 1998.
+        pa = atan(sin(H), tan(phi) * cos(c.dec) - sin(c.dec) * cos(H));
+
+    return {
+        azimuth: azimuth(H, phi, c.dec),
+        altitude: h + astroRefraction(h), // altitude correction for refraction,
+        distance: c.dist,
+        parallacticAngle: pa
+    };
+};
+
+
+// calculations for illumination parameters of the moon,
+// based on http://idlastro.gsfc.nasa.gov/ftp/pro/astro/mphase.pro formulas and
+// Chapter 48 of "Astronomical Algorithms" 2nd edition by Jean Meeus (Willmann-Bell, Richmond) 1998.
+
+function getMoonIllumination(date) {
+
+    const d = toDays(date || new Date()),
+        s = sunCoords(d),
+        m = moonCoords(d),
+
+        sdist = 149598000, // distance from Earth to Sun in km
+
+        phi = acos(sin(s.dec) * sin(m.dec) + cos(s.dec) * cos(m.dec) * cos(s.ra - m.ra)),
+        inc = atan(sdist * sin(phi), m.dist - sdist * cos(phi)),
+        angle = atan(cos(s.dec) * sin(s.ra - m.ra), sin(s.dec) * cos(m.dec) -
+                cos(s.dec) * sin(m.dec) * cos(s.ra - m.ra));
+
+    return {
+        fraction: (1 + cos(inc)) / 2,
+        phase: 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / Math.PI,
+        angle
+    };
+};
+
+
+function hoursLater(date, h) {
+    return new Date(date.valueOf() + h * dayMs / 24);
+}
+
+// calculations for moon rise/set times are based on http://www.stargazing.net/kepler/moonrise.html article
+
+function getMoonTimes(date, lat, lng, inUTC) {
+    const t = new Date(date);
+    if (inUTC) t.setUTCHours(0, 0, 0, 0);
+    else t.setHours(0, 0, 0, 0);
+
+    const hc = 0.133 * rad;
+    let h0 = getMoonPosition(t, lat, lng).altitude - hc,
+        rise, set, ye;
+
+    // go in 2-hour chunks, each time seeing if a 3-point quadratic curve crosses zero (which means rise or set)
+    for (let i = 1; i <= 24; i += 2) {
+        const h1 = getMoonPosition(hoursLater(t, i), lat, lng).altitude - hc;
+        const h2 = getMoonPosition(hoursLater(t, i + 1), lat, lng).altitude - hc;
+        const a = (h0 + h2) / 2 - h1;
+        const b = (h2 - h0) / 2;
+        const xe = -b / (2 * a);
+        const d = b * b - 4 * a * h1;
+        let roots = 0, x1 = 0, x2 = 0;
+        ye = (a * xe + b) * xe + h1;
+
+        if (d >= 0) {
+            const dx = Math.sqrt(d) / (Math.abs(a) * 2);
+            x1 = xe - dx;
+            x2 = xe + dx;
+            if (Math.abs(x1) <= 1) roots++;
+            if (Math.abs(x2) <= 1) roots++;
+            if (x1 < -1) x1 = x2;
+        }
+
+        if (roots === 1) {
+            if (h0 < 0) rise = i + x1;
+            else set = i + x1;
+
+        } else if (roots === 2) {
+            rise = i + (ye < 0 ? x2 : x1);
+            set = i + (ye < 0 ? x1 : x2);
+        }
+
+        if (rise && set) break;
+
+        h0 = h2;
+    }
+
+    const result = {};
+
+    if (rise) result.rise = hoursLater(t, rise);
+    if (set) result.set = hoursLater(t, set);
+
+    if (!rise && !set) result[ye > 0 ? 'alwaysUp' : 'alwaysDown'] = true;
+
+    return result;
+};
+
+window.SunCalc={getPosition:getPosition,getTimes:getTimes,addTime:addTime,getMoonPosition:getMoonPosition,getMoonIllumination:getMoonIllumination,getMoonTimes:getMoonTimes,times:times};
+})();
+</script>
+
+<script>
+/* ============================================================
+   Minimal READ-ONLY MQTT 3.1.1 over WebSocket client (no deps).
+   Sends only CONNECT / SUBSCRIBE / PINGREQ. No publish path.
+   ============================================================ */
+function MqttWsReader(url, topics, handlers){
+  this.url=url; this.topics=topics; this.h=handlers||{};
+  this.ws=null; this.pingTimer=null; this.keepalive=30; this._closed=false; this._buf=new Uint8Array(0);
+}
+MqttWsReader.prototype._st=function(s,d){ if(this.h.onStatus) this.h.onStatus(s,d); };
+function _encLen(len){var o=[];do{var b=len%128;len=Math.floor(len/128);if(len>0)b|=0x80;o.push(b);}while(len>0);return o;}
+function _decLen(b,off){var m=1,v=0,i=off,e;do{if(i>=b.length)return null;e=b[i++];v+=(e&127)*m;m*=128;if(m>128*128*128*128)return{error:1};}while((e&128)!==0);return{value:v,bytes:i-off};}
+function _utf8(s){var body=new TextEncoder().encode(s);var o=new Uint8Array(body.length+2);o[0]=(body.length>>8)&255;o[1]=body.length&255;o.set(body,2);return o;}
+function _cat(arr){var t=0;arr.forEach(function(a){t+=a.length;});var o=new Uint8Array(t),p=0;arr.forEach(function(a){o.set(a,p);p+=a.length;});return o;}
+MqttWsReader.prototype._send=function(b){ if(this.ws&&this.ws.readyState===1) this.ws.send(b); };
+MqttWsReader.prototype._connectPkt=function(){
+  var cid='bsf-dash-'+Math.floor((performance.now())%1e6);
+  var proto=_utf8('MQTT'); var vh=new Uint8Array(proto.length+4); vh.set(proto,0);
+  vh[proto.length]=0x04; vh[proto.length+1]=0x02; vh[proto.length+2]=(this.keepalive>>8)&255; vh[proto.length+3]=this.keepalive&255;
+  var rem=_cat([vh,_utf8(cid)]); this._send(_cat([new Uint8Array([0x10].concat(_encLen(rem.length))),rem]));
+};
+MqttWsReader.prototype._subPkt=function(){
+  var parts=[new Uint8Array([0x00,0x01])];
+  this.topics.forEach(function(t){parts.push(_utf8(t));parts.push(new Uint8Array([0x00]));});
+  var rem=_cat(parts); this._send(_cat([new Uint8Array([0x82].concat(_encLen(rem.length))),rem]));
+};
+MqttWsReader.prototype._pkt=function(type,flags,pl){
+  if(type===2){ var rc=pl.length>=2?pl[1]:255;
+    if(rc===0){ this._st('live'); this._subPkt(); var self=this; this.pingTimer=setInterval(function(){self._send(new Uint8Array([0xc0,0x00]));}, this.keepalive*800); }
+    else this._st('error','connack '+rc);
+  } else if(type===3){
+    var tlen=(pl[0]<<8)|pl[1]; var topic=new TextDecoder().decode(pl.subarray(2,2+tlen));
+    var idx=2+tlen; var qos=(flags>>1)&3; if(qos>0) idx+=2;
+    var text=new TextDecoder().decode(pl.subarray(idx)); var obj=text; try{obj=JSON.parse(text);}catch(e){}
+    if(this.h.onMessage) this.h.onMessage(topic,obj);
+  }
+};
+MqttWsReader.prototype._bytes=function(chunk){
+  var m=new Uint8Array(this._buf.length+chunk.length); m.set(this._buf,0); m.set(chunk,this._buf.length); this._buf=m;
+  while(this._buf.length>=2){
+    var type=(this._buf[0]>>4)&15, flags=this._buf[0]&15, li=_decLen(this._buf,1);
+    if(!li) break; if(li.error){this._buf=new Uint8Array(0);break;}
+    var hl=1+li.bytes, total=hl+li.value; if(this._buf.length<total) break;
+    this._pkt(type,flags,this._buf.subarray(hl,total)); this._buf=this._buf.subarray(total);
+  }
+};
+MqttWsReader.prototype.connect=function(){
+  this._closed=false; this._st('connecting'); var ws;
+  try{ ws=new WebSocket(this.url,'mqtt'); }catch(e){ this._st('error',String(e)); this._retry(); return; }
+  ws.binaryType='arraybuffer'; this.ws=ws; var self=this;
+  ws.onopen=function(){ self._connectPkt(); };
+  ws.onmessage=function(ev){ if(ev.data instanceof ArrayBuffer) self._bytes(new Uint8Array(ev.data)); else if(ev.data&&ev.data.arrayBuffer) ev.data.arrayBuffer().then(function(ab){self._bytes(new Uint8Array(ab));}); };
+  ws.onerror=function(){ self._st('error','ws'); };
+  ws.onclose=function(){ if(self.pingTimer){clearInterval(self.pingTimer);self.pingTimer=null;} self._st('closed'); self._retry(); };
+};
+MqttWsReader.prototype._retry=function(){ var self=this; if(!this._closed) setTimeout(function(){ if(!self._closed) self.connect(); },4000); };
+MqttWsReader.prototype.close=function(){ this._closed=true; if(this.pingTimer)clearInterval(this.pingTimer); if(this.ws){try{this.ws.close();}catch(e){}} };
+// PUBLISH (QoS0) — the page is read-only EXCEPT this one command path: the AC
+// heating setpoints (bsf/ac/cmd). The dispatcher validates every value server-side.
+// Only reachable on the farm LAN (the public relay path never opens this socket).
+MqttWsReader.prototype.publish=function(topic,payloadStr,qos){
+  if(!(this.ws&&this.ws.readyState===1)) return false;
+  qos=qos||0;
+  var parts=[_utf8(topic)];
+  var b1=0x30|((qos&3)<<1);
+  if(qos>0) parts.push(new Uint8Array([0x00,0x01]));   // packet id (QoS>0 only)
+  parts.push(new TextEncoder().encode(payloadStr));
+  var rem=_cat(parts);
+  this._send(_cat([new Uint8Array([b1].concat(_encLen(rem.length))),rem]));
+  return true;
+};
+
+/* ============================================================
+   Dashboard logic
+   ============================================================ */
+// Display config. Defaults match the original farm; install/deploy.py overrides them
+// in dashboard-config.js (window.BSF_CONFIG) so the gates shown here match the deployed
+// dispatcher. socDanger/socWarn drive the battery-chemistry SOC ring colour.
+var CFG=Object.assign(
+  { SURPLUS_ON:1800, SURPLUS_OFF:1200, ELEMENT:1600, AC_CAP:4000, AC_SAFETY:4200,
+    SOC_ON:80, SOC_OFF:75, INSIDE_ON:19, INSIDE_OFF:22, BATT_CAP_KWH:null,
+    socDanger:60, socWarn:75, chemistry:'lead-acid', acMode:'heating',
+    siteName:'Banksia Springs', currencySymbol:'$', pricePerKwh:0 },
+  (window.BSF_CONFIG||{}));
+
+// Apply site-specific display config (name + heating/cooling wording). Elements exist
+// (they're above this script). Cooling mode swaps the AC card's heating wording — note
+// the dispatcher itself ships heating-direction (cooling dispatch is a documented step).
+(function applyDisplayConfig(){
+  try{
+    var s=document.getElementById('siteNameSpan'); if(s) s.textContent='· '+(CFG.siteName||'Solar');
+    document.title='☀️ '+(CFG.siteName||'Solar')+' · Solar Dispatch';
+    if((CFG.acMode||'heating')==='cooling'){
+      var t=document.getElementById('acCardTitle'); if(t) t.textContent=t.textContent.replace(/heating/i,'cooling');
+      var o=document.getElementById('acOffSub'); if(o) o.textContent='never cool';
+      var p=document.getElementById('acSetpointTitle'); if(p) p.textContent='Cooling setpoints — tune';
+    }
+  }catch(e){}
+})();
+var HKEY='bsf_dash_history_v1', EKEY='bsf_dash_events_v1', DAY=24*3600*1000;
+
+var state={ hw:null, ac:null, hwTs:0, acTs:0, conn:'connecting' };
+var samples=[];   // {ts, hw, ac}  (NB: not named "history" — that collides with window.history)
+var events=[];    // {ts, src, kind, name, detail}
+var viewLive=true, viewIdx=0, viewTs=0;
+var lastTransition={hw:null, ac:null};
+// Inside temp is fed by a Tuya cloud poll into Node-RED flow context — it is NOT
+// on bsf/ac/status. In MQTT mode we backfill it from the relay snapshot so the
+// gate shows the real value rather than "feed missing".
+var relayTemp={val:null, age:null, usable:false, recv:0};
+// Per-plug load attribution (HW/AC broken out of the lumped Cerbo bucket). Only
+// the relay computes it (Tuya cloud), so — like relayTemp — it is carried here
+// and applied live in both MQTT and HTTP modes; history samples stay lumped.
+var relayLoads={data:null, recv:0};
+// pv_dc / pv_fronius split — the dispatcher caches but does NOT publish these on
+// MQTT, so the relay reads them (agg_cache) and emits them in /solar/state. On the
+// LAN (MQTT mode) hw comes straight off MQTT and lacks them, so — like relayTemp —
+// we backfill from the relay snapshot for the DC-MPPT vs Fronius diagram boxes.
+var relayPv={pv_dc:null, pv_fronius:null, recv:0};
+// Per-charger drill-down (Phase 3): the relay reads the four DC chargers off the
+// native Victron MQTT tree and emits them as hw.chargers in /solar/state. In HTTP
+// mode hw already carries them; on the LAN (MQTT mode) hw off the broker has none,
+// so — like relayPv — we backfill from the relay snapshot.
+var relayChargers={data:null, recv:0};
+// 7-day weekly aggregates (avg/min SOC, peak discharge, solar kWh, HW run+kWh,
+// hours at 100%). The relay accumulates them from the live stream and emits them
+// as snap.weekly in /solar/state. Carried here like the other relay-only blocks
+// and rendered into the "This week" tiles; independent of the live/scrub snapshot.
+var relayWeekly={data:null, recv:0};
+// v1.11 presence: on the LAN we read bsf/presence/state (full, incl. MACs) + candidates
+// straight off the broker; off-LAN we get a sanitized presence block via the relay
+// snapshot (no MACs, no candidates, registration disabled).
+var presence={data:null, recv:0};
+var candidates={data:null, recv:0, forSlot:null, scanning:false, registering:null};
+
+function $(id){return document.getElementById(id);}
+function load(k){ try{return JSON.parse(localStorage.getItem(k)||'[]');}catch(e){return [];} }
+function save(k,v){ try{localStorage.setItem(k,JSON.stringify(v));}catch(e){} }
+function prune(arr){ var cut=Date.now()-DAY; return arr.filter(function(x){return x.ts>=cut;}); }
+function fmtClock(ts){ var d=new Date(ts); return d.toLocaleTimeString('en-AU',{hour12:false}); }
+function fmtShort(ts){ var d=new Date(ts); return d.toLocaleString('en-AU',{hour12:false,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
+function num(x){ return (typeof x==='number'&&isFinite(x))?x:null; }
+function W(x){ var n=num(x); return n===null?'–':Math.round(n).toLocaleString(); }
+function signW(x){ var n=num(x); if(n===null)return '–'; return (n>=0?'+':'')+Math.round(n).toLocaleString(); }
+
+/* ---- bootstrap persisted ---- */
+samples=prune(load(HKEY)); events=prune(load(EKEY));
+
+/* ---- MQTT ---- */
+var reader=new MqttWsReader('ws://'+((window.BSF_CONFIG&&window.BSF_CONFIG.cerboIp)||'192.168.1.50')+':9001',
+  ['bsf/hotwater/status','bsf/ac/status','bsf/hotwater/log','bsf/ac/log','bsf/hotwater/anomaly','bsf/ac/anomaly',
+   'bsf/presence/state','bsf/presence/candidates'],
+  { onStatus:onStatus, onMessage:onMessage });
+reader.connect();
+
+/* ---- HTTP-poll fallback ----------------------------------------------------
+   On the farm WiFi the MQTT-over-WS path above works. Served publicly (https,
+   off-LAN) the browser can't reach the broker, so after a short watchdog we
+   fall back to polling the farm relay's sanitized snapshot (/solar/state,
+   /solar/history). Same render path, just a different read. Still read-only. */
+var POLL_MS=15000, httpMode=false, httpTimer=null, histTimer=null;
+var mqttWatchdog=setTimeout(function(){ if(!state.hwTs && !state.acTs) startHttpMode(); }, 6000);
+function setSrc(mode){
+  var el=$('srcLine'); if(!el) return;
+  el.textContent = (mode==='mqtt')
+    ? 'live from the Cerbo broker over MQTT-over-WebSocket (farm network).'
+    : 'live via the farm relay — a sanitized read-only snapshot refreshed every ~15 s.';
+}
+function startHttpMode(){
+  if(httpMode) return; httpMode=true;
+  try{ reader.close(); }catch(e){}
+  setSrc('http'); loadHttpHistory(); pollHttp();
+  httpTimer=setInterval(pollHttp, POLL_MS);
+  histTimer=setInterval(loadHttpHistory, 60000);
+}
+function pollHttp(){
+  fetch('/solar/state',{cache:'no-store'})
+    .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+    .then(function(snap){
+      if(!snap || !snap.ok || (!snap.hw && !snap.ac)){ state.conn='stale'; paintConn(); paintStale(currentSnapshot()); return; }
+      var now=Date.now();
+      if(snap.hw){ state.hw=snap.hw; state.hwTs = now - (snap.hw_age_s ? snap.hw_age_s*1000 : 0); }
+      if(snap.ac){ state.ac=snap.ac; state.acTs = now - (snap.ac_age_s ? snap.ac_age_s*1000 : 0); }
+      if(snap.loads){ relayLoads={data:snap.loads, recv:now}; }
+      if(snap.hw && (snap.hw.pv_dc!=null || snap.hw.pv_fronius!=null)){ relayPv={pv_dc:snap.hw.pv_dc, pv_fronius:snap.hw.pv_fronius, recv:now}; }
+      if(snap.hw && snap.hw.chargers){ relayChargers={data:snap.hw.chargers, recv:now}; }
+      if(snap.weekly){ relayWeekly={data:snap.weekly, recv:now}; renderWeekly(); }
+      if(snap.presence){ presence={data:snap.presence, recv:now}; renderPresence(); }
+      state.conn='live'; if(viewLive) render(currentSnapshot()); paintConn();
+    })
+    .catch(function(){ state.conn='closed'; paintConn(); paintStale(currentSnapshot()); });
+}
+function loadHttpHistory(){
+  fetch('/solar/history',{cache:'no-store'}).then(function(r){return r.json();}).then(function(h){
+    if(!h) return;
+    if(Array.isArray(h.samples)){ samples=prune(h.samples); save(HKEY,samples); $('tmSlider').max=Math.max(0,samples.length-1); if(viewLive) $('tmSlider').value=samples.length-1; }
+    if(Array.isArray(h.events)){ events=prune(h.events); save(EKEY,events); renderHistory(); }
+    if(Array.isArray(h.daily)){ detailDaily=h.daily; if(DETAIL.node) renderDetail(); }   // Phase C archive
+  }).catch(function(){});
+}
+
+function refreshRelayTemp(){
+  if(httpMode) return;  // HTTP mode already carries inside_temp in the snapshot
+  var urls=['/solar/state','state.json'];
+  (function go(i){ if(i>=urls.length) return;
+    fetch(urls[i],{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(snap){
+        var got=false;
+        if(snap && snap.ac && snap.ac.inside_temp!=null){
+          relayTemp={val:snap.ac.inside_temp, age:snap.ac.inside_temp_age_s, usable:!!snap.ac.inside_temp_usable, recv:Date.now()};
+          got=true;
+        }
+        if(snap && snap.loads){ relayLoads={data:snap.loads, recv:Date.now()}; got=true; }
+        if(snap && snap.hw && (snap.hw.pv_dc!=null || snap.hw.pv_fronius!=null)){ relayPv={pv_dc:snap.hw.pv_dc, pv_fronius:snap.hw.pv_fronius, recv:Date.now()}; got=true; }
+        if(snap && snap.hw && snap.hw.chargers){ relayChargers={data:snap.hw.chargers, recv:Date.now()}; got=true; }
+        if(snap && snap.weekly){ relayWeekly={data:snap.weekly, recv:Date.now()}; renderWeekly(); }
+        if(snap && snap.presence){ presence={data:snap.presence, recv:Date.now()}; renderPresence(); }
+        if(got && viewLive) render(currentSnapshot());
+      }).catch(function(){ go(i+1); });
+  })(0);
+}
+
+function onStatus(s){ state.conn=s; if(s==='live' && !httpMode) setSrc('mqtt'); paintConn(); }
+
+function onMessage(topic, obj){
+  var now=Date.now();
+  if(topic==='bsf/hotwater/status'){ state.hw=obj; state.hwTs=now; detectTransition('hw', obj.hwState); pushHistory(now); }
+  else if(topic==='bsf/ac/status'){ state.ac=obj; state.acTs=now; detectTransition('ac', obj.acState); pushHistory(now); }
+  else if(topic==='bsf/presence/state'){ presence={data:obj, recv:now}; renderAcMode(state.ac); renderPresence(); return; }
+  else if(topic==='bsf/presence/candidates'){ candidates.data=obj; candidates.recv=now; candidates.scanning=false; renderCandidates(); return; }
+  else if(/\/log$/.test(topic)||/\/anomaly$/.test(topic)){ pushEvent(topic, obj, now); }
+  if(viewLive) render(currentSnapshot());
+  paintConn();
+}
+
+var lastHistTs=0;
+function pushHistory(now){
+  if(now-lastHistTs < 9000) { // keep ~10s cadence; just update last entry's live pair
+    if(samples.length){ samples[samples.length-1]={ts:now, hw:state.hw, ac:state.ac}; }
+    else { samples.push({ts:now, hw:state.hw, ac:state.ac}); }
+  } else {
+    samples.push({ts:now, hw:state.hw, ac:state.ac}); lastHistTs=now;
+  }
+  samples=prune(samples); if(samples.length>3200) samples=samples.slice(samples.length-3200);
+  save(HKEY,samples);
+  $('tmSlider').max=Math.max(0,samples.length-1);
+  if(viewLive){ $('tmSlider').value=samples.length-1; }
+}
+
+function detectTransition(src, st){
+  if(st==null) return;
+  var prev=lastTransition[src];
+  if(prev!==null && prev!==st){
+    var on=(st==='on');
+    pushEvent('observed:'+src, {event:(on?'ON':'OFF'), observed:true}, Date.now());
+  }
+  lastTransition[src]=st;
+}
+
+function pushEvent(topic, obj, now){
+  var src = topic.indexOf('hotwater')>=0||topic.indexOf(':hw')>=0 ? 'hw' : (topic.indexOf('ac')>=0?'ac':'sys');
+  var anomaly = /anomaly/.test(topic);
+  var ts = (obj && obj.ts) ? Date.parse(obj.ts) : now; if(!ts||isNaN(ts)) ts=now;
+  var name = (obj && (obj.event||obj.reason)) || (anomaly?'anomaly':'event');
+  var ev={ ts:ts, src:src, kind:(anomaly?'warn':(/^on/i.test(name)?'on':(/^off/i.test(name)?'off':'evt'))),
+           name:String(name), detail:summarizeEvent(obj), observed:!!(obj&&obj.observed) };
+  // de-dup rapid identical
+  var last=events[events.length-1];
+  if(last && Math.abs(last.ts-ev.ts)<1500 && last.name===ev.name && last.src===ev.src) return;
+  events.push(ev); events=prune(events); if(events.length>500) events=events.slice(events.length-500);
+  save(EKEY,events); renderHistory();
+}
+function summarizeEvent(o){
+  if(!o) return '';
+  var bits=[];
+  if(o.observed) bits.push('observed from status');
+  ['soc','surplus','ac','batt_power','reason'].forEach(function(k){ if(o[k]!==undefined && k!=='reason') bits.push(k+' '+o[k]); });
+  if(o.reason && !/^on|^off/i.test(String(o.event||''))) {} // reason already the name
+  return bits.join(' · ');
+}
+
+/* ---- snapshot selection (live vs scrub) ---- */
+function currentSnapshot(){ return { hw:state.hw, ac:state.ac, ts:Math.max(state.hwTs,state.acTs)||Date.now(), live:true }; }
+
+/* ---- which curtailment signal(s) are firing ----
+   The dispatcher ORs three terms (hwv3.fn.dispatcher):
+     curtailed = curtailed_heuristic || mppt_curtailed || fronius_curtailed
+   It publishes curtailed_heuristic + mppt_curtailed on the status, but NOT fronius_curtailed.
+   So we read the two published flags directly and infer Fronius by elimination: if overall
+   curtailed fires while neither published sub-flag is set, the remaining OR term (Fronius
+   freq-shift throttle, pv_fronius<50W) is the only thing left that could be true.
+   This keeps the per-charger drill-down and the PV-headroom gate from appearing to contradict. */
+function curtailReasons(hw){
+  if(!hw || !hw.curtailed) return [];
+  var r=[];
+  if(hw.mppt_curtailed) r.push('MPPT backed-off');
+  if(hw.curtailed_heuristic) r.push('battery near-full');
+  if(!hw.mppt_curtailed && !hw.curtailed_heuristic) r.push('Fronius throttled');
+  return r;
+}
+
+/* ---- gate evaluation ---- */
+function hwGates(hw){
+  if(!hw) return [];
+  var soc=num(hw.soc), surplus=num(hw.surplus_now), acAfter=num(hw.ac_after_on),
+      curtailed=!!hw.curtailed, crLabel=curtailReasons(hw).join(' + '),
+      mode=hw.mode, stale=hw.stale||[], acLoad=num(hw.ac_load);
+  // "after on" double-counts the 1.6kW element when HW is already on (ac_load already includes it).
+  // Honest power-output figure: current ac_load when HW on; the published ac_after_on when off.
+  var acCap = (hw.hwState==='on') ? acLoad : acAfter;
+  var inWindow = mode==='DISPATCH';
+  var fresh = (stale.length===0);
+  var socOk = soc!==null && soc>=CFG.SOC_ON;
+  // PV-headroom is asymmetric like the dispatcher: turn-ON needs ≥1800 W, but once ON it only needs
+  // to stay above the published OFF floor (off_thresh_active = 1200 normal / 300 curtailed). Mirrors
+  // the hwState branch on the Power-output-cap row above (acCap, line ~517).
+  var offFloor = (num(hw.off_thresh_active)!==null) ? num(hw.off_thresh_active) : CFG.SURPLUS_OFF;
+  var surOk = (hw.hwState==='on')
+    ? ((surplus!==null && surplus>offFloor) || (curtailed && soc!==null && soc>=CFG.SOC_ON))
+    : ((surplus!==null && surplus>=CFG.SURPLUS_ON) || (curtailed && soc!==null && soc>=CFG.SOC_ON));
+  var capOk = acCap!==null && acCap<=CFG.AC_CAP;
+  return [
+    {k:'Dispatch window', v: mode||'?', t:'sunrise → sunset−2h', pass:inWindow, unknown:false,
+       raw:(inWindow?'DISPATCH ✓':'LOCKOUT')},
+    {k:'Data fresh', v:(fresh?'all feeds fresh':('stale: '+stale.join(', '))), t:'Cerbo feeds < 5 min', pass:fresh},
+    {k:'Battery SOC', v:(soc===null?'–':soc+'%'), t:'≥ '+CFG.SOC_ON+'% (floor 75%)', pass:socOk},
+    {k:'PV headroom', v:(surplus===null?'–':signW(surplus)+' W'+(curtailed?' · curtailed'+(crLabel?' ('+crLabel+')':''):'')), t:(hw.hwState==='on'?'stay-on: > '+offFloor+' W or curtailment':'≥ '+CFG.SURPLUS_ON+' W or curtailment')+(curtailed&&crLabel?' — firing via '+crLabel:''), pass:surOk},
+    {k:'Power output cap', v:(acCap===null?'–':W(acCap)+' W'), t:'power output ≤ '+CFG.AC_CAP+' W', pass:capOk},
+    {k:'Safety floor', v:(soc===null?'–':'SOC '+soc+'% · AC '+W(acLoad)+'W'), t:'SOC≥75% · AC≤'+CFG.AC_SAFETY+'W', pass:(soc!==null&&soc>=CFG.SOC_OFF&&(acLoad===null||acLoad<=CFG.AC_SAFETY))}
+  ];
+}
+function acGates(ac){
+  if(!ac) return [];
+  var soc=num(ac.soc), win=ac.window, onPct=num(ac.on_pct), acLoad=num(ac.ac_load),
+      inside=num(ac.inside_temp), insideUsable=ac.inside_temp_usable, insideAge=num(ac.inside_temp_age_s);
+  // backfill from the relay (MQTT status doesn't carry the cloud-polled temp)
+  if(inside===null && relayTemp.val!=null && (Date.now()-relayTemp.recv)<120000){
+    inside=relayTemp.val; insideUsable=relayTemp.usable; insideAge=relayTemp.age;
+  }
+  var inWindow = win && win!=='LOCKOUT';
+  var tier = onPct!==null?onPct:(inWindow?'?':null);
+  var socOk = soc!==null && onPct!==null && soc>=onPct;
+  var loadOk = acLoad===null || acLoad<=CFG.AC_SAFETY;
+  var tempMissing = (inside===null && ac.inside_temp===undefined);
+  // live thresholds (dispatcher echoes them on bsf/ac/status; fall back to CFG defaults)
+  var onC = num(ac.inside_temp_on_c);  if(onC===null) onC=CFG.INSIDE_ON;
+  var offC = num(ac.inside_temp_off_c); if(offC===null) offC=CFG.INSIDE_OFF;
+  var tempOk = inside!==null && insideUsable!==false && inside<onC;
+  return [
+    {k:'Dispatch window', v:(win||'?'), t:'pre-8 / 8–13 / 13→sunset−2h', pass:inWindow,
+       raw:(inWindow?win+' ✓':'LOCKOUT')},
+    {k:'SOC tier', v:(soc===null?'–':soc+'%'+(onPct!==null?(' / need '+onPct+'%'):'')), t:'≥ window tier (80/90/99%)', pass:socOk, unknown:(onPct===null&&inWindow)},
+    {k:'Inside temp', v:(tempMissing?'feed missing':(inside===null?'–':inside+'°C'+(insideAge!==null?(' · '+insideAge+'s old'):''))), t:'heat < '+onC+'°C · off at '+offC+'°C, fresh < 10 min', pass:tempOk, unknown:tempMissing},
+    {k:'AC load', v:(acLoad===null?'–':W(acLoad)+' W'), t:'≤ '+CFG.AC_SAFETY+' W', pass:loadOk}
+  ];
+}
+
+/* ============================================================
+   Sky band — sun + moon ride real astronomical positions.
+   Display-only: SunCalc projection of altitude/azimuth onto a band across the
+   top of the Energy Flow diagram. Touches NOTHING in the dispatcher data path.
+   x = CX + HALF·cos(alt)·sin(az)   (east→left, west→right; hemisphere-agnostic)
+   y = YH  − BAND·sin(alt)          (horizon at YH, zenith near band top)
+   ============================================================ */
+var SKY={ LAT:((window.BSF_CONFIG&&typeof window.BSF_CONFIG.lat==='number')?window.BSF_CONFIG.lat:-27.47),
+          LON:((window.BSF_CONFIG&&typeof window.BSF_CONFIG.lon==='number')?window.BSF_CONFIG.lon:153.02),
+          // Your farm's latitude/longitude — set in dashboard-config.js (drives the
+          // sun/moon horizon arc). Fallback above is generic SE-QLD, not a real site.
+          CX:134, HALF:190, YH:-6, BAND:76, SOUTH:((window.BSF_CONFIG&&typeof window.BSF_CONFIG.lat==='number')?window.BSF_CONFIG.lat:-27.47)<0 };
+if(window.SunCalc){ SunCalc.getPosition._k='sun'; SunCalc.getMoonPosition._k='moon'; }
+function skyXY(pos){
+  return { x: SKY.CX + SKY.HALF*Math.cos(pos.altitude)*Math.sin(pos.azimuth),
+           y: SKY.YH - SKY.BAND*Math.sin(Math.max(pos.altitude,0)),
+           up: pos.altitude > -0.0145 };   // -0.83° = geometric horizon incl. refraction
+}
+// Lit portion of the moon as an SVG path: outer limb (a true semicircle on the lit
+// side) + terminator (half-ellipse whose width shrinks to 0 at the quarters and
+// flips its bulge at the crescent↔gibbous boundary). litLeft does the S-hemisphere flip.
+function moonLitPathD(r, frac, litLeft){
+  frac=Math.max(0,Math.min(1,frac));
+  if(frac<=0.012) return '';   // new moon — nothing lit
+  if(frac>=0.988) return 'M0 '+(-r)+' A '+r+' '+r+' 0 1 1 0 '+r+' A '+r+' '+r+' 0 1 1 0 '+(-r)+' Z'; // full
+  var rx=r*Math.abs(1-2*frac), gibbous=frac>0.5, oS, tS;
+  if(litLeft){ oS=0; tS=gibbous?0:1; } else { oS=1; tS=gibbous?1:0; }
+  return 'M0 '+(-r)+' A '+r+' '+r+' 0 0 '+oS+' 0 '+r+' A '+rx.toFixed(2)+' '+r+' 0 0 '+tS+' 0 '+(-r)+' Z';
+}
+// Faint guide arc = the body's real path across the displayed day (cached per day).
+var _arcCache={};
+function dayArcD(fn,t){
+  var d=new Date(t), key=fn._k+'|'+d.getFullYear()+'-'+d.getMonth()+'-'+d.getDate();
+  if(_arcCache[key]!==undefined) return _arcCache[key];
+  var base=new Date(d); base.setHours(0,0,0,0); var pts=[];
+  for(var i=0;i<=96;i++){
+    var pos=fn(new Date(base.getTime()+i*9e5), SKY.LAT, SKY.LON);   // every 15 min
+    if(pos.altitude>0){ var p=skyXY(pos); pts.push(p.x.toFixed(1)+' '+p.y.toFixed(1)); }
+  }
+  var dd=pts.length>1?('M'+pts.join(' L')):''; _arcCache[key]=dd; return dd;
+}
+var _lastSun={x:1e9,y:1e9};
+function setParticlePath(id,d){ var p=$(id); if(!p) return;
+  var am=p.getElementsByTagName('animateMotion')[0]; if(am) am.setAttribute('path',d); }
+// "x y" point on the sun's edge (~r15, just past the r13 disk) toward a target — particles
+// start here so they emerge from the rim instead of from the hidden centre of the disk.
+function sunEdge(sx,sy,tx,ty){ var dx=tx-sx,dy=ty-sy,L=Math.hypot(dx,dy)||1,r=15;
+  return (sx+dx/L*r).toFixed(1)+' '+(sy+dy/L*r).toFixed(1); }
+function updateSky(t){
+  if(!window.SunCalc) return;
+  if(typeof window.__skyTimeOverride==='number') t=window.__skyTimeOverride;   // test hook
+  if(!t) t=Date.now();
+  var date=new Date(t);
+  var sp=SunCalc.getPosition(date,SKY.LAT,SKY.LON), mp=SunCalc.getMoonPosition(date,SKY.LAT,SKY.LON);
+  var s=skyXY(sp), m=skyXY(mp);
+  var sa=$('arcSun'); if(sa) sa.setAttribute('d',dayArcD(SunCalc.getPosition,t));
+  var ma=$('arcMoon'); if(ma) ma.setAttribute('d',dayArcD(SunCalc.getMoonPosition,t));
+  // sun body + a warm horizon glow that strengthens as it sits low
+  var sb=$('sunBody');
+  if(sb){ sb.style.display=s.up?'':'none'; if(s.up) sb.setAttribute('transform','translate('+s.x.toFixed(1)+' '+s.y.toFixed(1)+')'); }
+  var glow=$('sunGlow');
+  if(glow){ var g=s.up?Math.max(0,Math.min(1,(12-sp.altitude*57.2958)/12)):0;
+    glow.setAttribute('cx',s.x.toFixed(1)); glow.setAttribute('opacity',(g*0.5).toFixed(2)); }
+  // moon body + computed phase terminator (accurate to the displayed instant). A new
+  // moon has no lit face — drawing it would put a meaningless dark disk in the sky (and
+  // right on top of the daytime sun when they coincide, the old "black dot"), so only
+  // show the moon when it's up AND has a lit sliver (0.012 = moonLitPathD's empty floor).
+  var mb=$('moonBody');
+  if(mb){
+    var il=m.up?SunCalc.getMoonIllumination(date):null;
+    var moonVisible=!!(m.up && il && il.fraction>0.012);
+    mb.style.display=moonVisible?'':'none';
+    if(moonVisible){
+      mb.setAttribute('transform','translate('+m.x.toFixed(1)+' '+m.y.toFixed(1)+')');
+      var litLeft=SKY.SOUTH?(il.angle<0):(il.angle>=0);
+      var lit=$('moonLit'); if(lit) lit.setAttribute('d',moonLitPathD(12,il.fraction,litLeft));
+    }
+  }
+  // re-anchor the sun→DC-MPPT and sun→Fronius dotted rays (and the particle starts)
+  var ca=$('c_sun_arr'), cf=$('c_sun_fron');
+  if(s.up){
+    var sx=s.x.toFixed(1), sy=s.y.toFixed(1);
+    if(ca) ca.setAttribute('d','M'+sx+' '+sy+' L180 22');
+    if(cf) cf.setAttribute('d','M'+sx+' '+sy+' L-41 122');
+    if(Math.abs(s.x-_lastSun.x)>0.8||Math.abs(s.y-_lastSun.y)>0.8){   // gate: avoid SMIL restart jitter
+      _lastSun={x:s.x,y:s.y};
+      // start each particle AT the sun's edge (not its centre) so it visibly emerges
+      // from the disk rather than popping into view from behind it.
+      // FLOW 1 aims at the DC MPPT top-centre (180,22) then drops the DC column to
+      // the battery top (180,116) — riding c_sun_arr then c_arr_bat exactly.
+      var eg=sunEdge(s.x,s.y,180,22), ef=sunEdge(s.x,s.y,-41,122);
+      setParticlePath('p_gen','M'+eg+' L180 22 L180 116');
+      setParticlePath('p_gen2','M'+eg+' L180 22 L180 116');
+      setParticlePath('p_fron_in','M'+ef+' L-41 122');
+    }
+  } else {
+    // sun below horizon — drop the rays so they don't dangle from an empty sky
+    if(ca) ca.setAttribute('d',''); if(cf) cf.setAttribute('d','');
+  }
+}
+
+/* ---- render ---- */
+/* ============================================================
+   AC heating-threshold control — the ONLY write path on this page.
+   Heating semantics (Daikin in heat mode): the AC turns ON when the inside temp
+   falls BELOW the ON setpoint and OFF when it reaches the OFF setpoint, so ON < OFF
+   (the opposite of a cooling thermostat). +/- stage local edits; nothing is sent
+   until Save → confirm. The write is an MQTT 'bsf/ac/cmd' over the same WebSocket
+   the page already uses — LAN only (the public relay never opens that socket, so
+   Save is disabled off-LAN). The dispatcher re-validates every value server-side.
+   ============================================================ */
+var AC_LIM={ON_MIN:16,ON_MAX:26,OFF_MIN:18,OFF_MAX:28,GAP:1.0,STEP:0.5,LO:14,HI:28};
+var acCtl={srvOn:null,srvOff:null,on:null,off:null,changedTs:null,changedSrc:null,
+           dirty:false,saving:false,saveTs:0,confirming:false,note:''};
+function acClampStep(v,lo,hi){ v=Math.round(v*2)/2; if(v<lo)v=lo; if(v>hi)v=hi; return v; }
+function acEnforce(which){
+  // heating hysteresis: OFF must stay >= ON + GAP — the partner moves to keep it.
+  acCtl.on =acClampStep(acCtl.on, AC_LIM.ON_MIN, AC_LIM.ON_MAX);
+  acCtl.off=acClampStep(acCtl.off,AC_LIM.OFF_MIN,AC_LIM.OFF_MAX);
+  if(acCtl.off < acCtl.on + AC_LIM.GAP){
+    if(which==='on'){ acCtl.off=acClampStep(acCtl.on+AC_LIM.GAP,AC_LIM.OFF_MIN,AC_LIM.OFF_MAX);
+      if(acCtl.off < acCtl.on+AC_LIM.GAP) acCtl.on=acClampStep(acCtl.off-AC_LIM.GAP,AC_LIM.ON_MIN,AC_LIM.ON_MAX); }
+    else { acCtl.on=acClampStep(acCtl.off-AC_LIM.GAP,AC_LIM.ON_MIN,AC_LIM.ON_MAX);
+      if(acCtl.off < acCtl.on+AC_LIM.GAP) acCtl.off=acClampStep(acCtl.on+AC_LIM.GAP,AC_LIM.OFF_MIN,AC_LIM.OFF_MAX); }
+  }
+}
+function acIsWritable(){ return !httpMode && state.conn==='live' && reader && reader.ws && reader.ws.readyState===1; }
+function acStep(which,delta){
+  if(!acIsWritable() || acCtl.on===null || acCtl.off===null) return;
+  acCtl.confirming=false;
+  if(which==='on') acCtl.on=acClampStep(acCtl.on+delta,AC_LIM.ON_MIN,AC_LIM.ON_MAX);
+  else acCtl.off=acClampStep(acCtl.off+delta,AC_LIM.OFF_MIN,AC_LIM.OFF_MAX);
+  acEnforce(which);
+  acCtl.dirty=(acCtl.on!==acCtl.srvOn || acCtl.off!==acCtl.srvOff);
+  acCtl.note='';
+  renderAcControl(state.ac);
+}
+function acSaveClick(){ if(!acCtl.dirty||!acIsWritable())return; acCtl.confirming=true; renderAcControl(state.ac); }
+function acCancel(){ acCtl.confirming=false; acCtl.on=acCtl.srvOn; acCtl.off=acCtl.srvOff; acCtl.dirty=false; acCtl.note=''; renderAcControl(state.ac); }
+function acApply(){
+  acCtl.confirming=false;
+  if(!acIsWritable()){ acCtl.note="Not connected to the farm broker — can't save."; renderAcControl(state.ac); return; }
+  var payload={action:'set_thresholds',on_c:acCtl.on,off_c:acCtl.off,source:'dashboard'};
+  if(reader.publish('bsf/ac/cmd',JSON.stringify(payload),0)){
+    acCtl.saving=true; acCtl.saveTs=Date.now(); acCtl.dirty=false;
+    acCtl.srvOn=acCtl.on; acCtl.srvOff=acCtl.off;   // optimistic; reconciled on the dispatcher's echo
+    acCtl.note='Saved ✓ — applies on the next dispatcher tick.';
+  } else { acCtl.note="Not connected — can't save."; }
+  renderAcControl(state.ac);
+}
+function acSyncFromState(ac){
+  if(!ac) return;
+  var so=num(ac.inside_temp_on_c), sf=num(ac.inside_temp_off_c);
+  if(so!==null) acCtl.srvOn=so; if(sf!==null) acCtl.srvOff=sf;
+  acCtl.changedTs=num(ac.thresholds_changed_ts); acCtl.changedSrc=ac.thresholds_changed_src||null;
+  if(acCtl.dirty) return;                                  // user mid-edit — never clobber
+  if(acCtl.saving){                                        // awaiting the dispatcher's confirm
+    if(acCtl.changedTs && acCtl.changedTs>=acCtl.saveTs-2000){ acCtl.saving=false; }
+    else return;                                           // hold optimistic values until it catches up
+  }
+  if(acCtl.srvOn!==null) acCtl.on=acCtl.srvOn;
+  if(acCtl.srvOff!==null) acCtl.off=acCtl.srvOff;
+}
+function acPos(v){ return Math.max(0,Math.min(100,(v-AC_LIM.LO)/(AC_LIM.HI-AC_LIM.LO)*100)); }
+function renderAcControl(ac){
+  acSyncFromState(ac);
+  var box=$('acCtl'); if(!box) return;
+  var writable=acIsWritable(), ready=(acCtl.on!==null&&acCtl.off!==null);
+  var inside = ac?num(ac.inside_temp):null;
+  if(inside===null && relayTemp.val!=null && (Date.now()-relayTemp.recv)<120000) inside=relayTemp.val;
+  var acOn = !!(ac && ac.acState==='on');
+  if($('acCtlLive')) $('acCtlLive').innerHTML=(inside!==null?'Inside <b>'+inside.toFixed(1)+'°</b>':'Inside <b>–</b>')+' · AC <b>'+(acOn?'ON':'OFF')+'</b>';
+  if($('acOnVal'))  $('acOnVal').textContent = ready?acCtl.on.toFixed(1)+'°':'–';
+  if($('acOffVal')) $('acOffVal').textContent= ready?acCtl.off.toFixed(1)+'°':'–';
+  if(ready){
+    var l=acPos(acCtl.on), r=acPos(acCtl.off);
+    if($('acZone')){ $('acZone').style.left=l+'%'; $('acZone').style.width=Math.max(0,r-l)+'%'; }
+    var dot=$('acDot');
+    if(dot){ if(inside!==null){ dot.style.display='block'; dot.style.left=acPos(inside)+'%'; } else dot.style.display='none'; }
+  }
+  ['acOnMinus','acOnPlus','acOffMinus','acOffPlus'].forEach(function(id){ var b=$(id); if(b) b.disabled=!(writable&&ready); });
+  if($('acSaveBtn')) $('acSaveBtn').disabled=!(writable&&acCtl.dirty);
+  box.classList.toggle('dirty', acCtl.dirty);
+  box.classList.toggle('confirming', acCtl.confirming&&acCtl.dirty);
+  box.classList.toggle('locked', !writable);
+  if(acCtl.confirming && $('acConfirmTxt')) $('acConfirmTxt').textContent='Apply — heat ON below '+acCtl.on.toFixed(1)+'°, OFF at '+acCtl.off.toFixed(1)+'°?';
+  var lastEl=$('acLast');
+  if(lastEl){
+    if(acCtl.changedTs){
+      var when=new Date(acCtl.changedTs).toLocaleString('en-AU',{hour:'2-digit',minute:'2-digit',day:'numeric',month:'short',hour12:false});
+      var who=(acCtl.changedSrc&&acCtl.changedSrc!=='dashboard')?(' · '+acCtl.changedSrc):'';
+      lastEl.textContent='Set '+(acCtl.srvOn!=null?acCtl.srvOn.toFixed(1):'–')+'° / '+(acCtl.srvOff!=null?acCtl.srvOff.toFixed(1):'–')+'° at '+when+who;
+    } else lastEl.textContent='Running defaults — 19.0° / 22.0°, not yet adjusted.';
+  }
+  var noteEl=$('acNote');
+  if(noteEl){
+    var txt = !writable ? (httpMode?'Adjust on the farm network — controls are read-only here.':'Connecting to the farm broker…') : (acCtl.note||'');
+    noteEl.textContent=txt; noteEl.style.display=txt?'block':'none';
+  }
+}
+
+/* ============================================================
+   v1.11 presence-aware AC — mode switch (AUTO/ON/OFF), presence list, MAC
+   registration. All writes are MQTT 'bsf/ac/cmd' (mode) / 'bsf/presence/cmd'
+   (registration) over the same LAN-only WebSocket the page already uses. The
+   dispatcher + detector re-validate every command server-side. Off-LAN the page
+   reads presence from the sanitized relay snapshot and every control is disabled.
+   ============================================================ */
+var acModePend={mode:null, ts:0};   // optimistic highlight until the dispatcher echoes
+function acSetMode(mode){
+  if(!acIsWritable()) return;
+  if(!reader.publish('bsf/ac/cmd', JSON.stringify({action:'set_mode', mode:mode, source:'dashboard'}), 0)) return;
+  acModePend={mode:mode, ts:Date.now()};
+  renderAcMode(state.ac);
+}
+function renderAcMode(ac){
+  var box=$('acMode'); if(!box) return;
+  var writable=acIsWritable();
+  var srvMode = (ac && ac.ac_mode) ? ac.ac_mode : null;
+  if(acModePend.mode && (srvMode===acModePend.mode || (Date.now()-acModePend.ts)>8000)) acModePend.mode=null;
+  var shown = acModePend.mode || srvMode || 'AUTO';
+  ['AUTO','ON','OFF'].forEach(function(m){
+    var b=$('acMode'+m); if(!b) return;
+    b.classList.toggle('active', shown===m);
+    b.classList.toggle('pending', acModePend.mode===m && srvMode!==m);
+    b.disabled = !writable;
+  });
+  box.classList.toggle('locked', !writable);
+  var pr = presence.data;
+  var anyone = pr ? !!pr.anyone_home : (ac? !!ac.anyone_home : false);
+  var configured = pr ? !!pr.configured : (ac? !!ac.presence_configured : false);
+  var acOn = !!(ac && ac.acState==='on');
+  if($('acModeSub')) $('acModeSub').innerHTML = 'AC is <b>'+(acOn?'ON':'OFF')+'</b>';
+  var txt='';
+  if(shown==='OFF') txt='Heating forced OFF — overrides temperature, solar and presence.';
+  else if(shown==='ON') txt='Heats whenever it’s cold and there’s solar surplus — ignores who’s home.';
+  else { // AUTO
+    if(!configured) txt='Heats on solar + cold like before — register a phone below to switch on the “only when someone’s home” gate.';
+    else if(anyone) txt='Someone’s home — heats when it’s cold and there’s solar surplus.';
+    else txt='Nobody home — heating held off until a registered phone is back on the WiFi.';
+  }
+  if(!writable) txt += (httpMode? '  ·  Switch modes on the farm network (read-only here).' : '  ·  Connecting to the farm broker…');
+  if($('acModeNote')) $('acModeNote').textContent=txt;
+}
+
+function fmtAgo(ms){
+  if(!ms) return '';
+  var s=Math.max(0,Math.round((Date.now()-ms)/1000));
+  if(s<45) return 'just now';
+  if(s<3600) return Math.round(s/60)+' min ago';
+  var h=Math.floor(s/3600), m=Math.round((s%3600)/60);
+  return h+'h'+(m?(' '+m+'m'):'')+' ago';
+}
+function fmtSince(ms){ if(!ms) return ''; var d=new Date(ms);
+  return 'since '+d.toLocaleTimeString('en-AU',{hour12:false,hour:'2-digit',minute:'2-digit'}); }
+
+function renderPresence(){
+  var el=$('presenceList'); if(!el) return;
+  var pr=presence.data, writable=acIsWritable();
+  if(!pr || !Array.isArray(pr.people)){
+    el.innerHTML='<div class="presence-row"><span class="presence-dot empty"></span><span class="presence-name">Presence</span><span class="presence-meta">detector starting…</span></div>';
+    return;
+  }
+  // auto-close the registration overlay once the target slot has filled
+  if(candidates.forSlot && candidates.registering){
+    var done=pr.people.filter(function(p){return p.slot===candidates.forSlot && p.registered;})[0];
+    if(done){ candidates.registering=null; acCloseCand(); }
+  }
+  el.innerHTML = pr.people.map(function(p){
+    var dotCls = p.home? 'home' : (p.registered? '' : 'empty');
+    var tag = p.registered ? '' : '<span class="tag">slot empty</span>';
+    var meta;
+    if(p.home){ meta = '<b>home</b> · '+(p.home_since_ms?fmtSince(p.home_since_ms):fmtAgo(p.last_seen_ms)); }
+    else if(p.registered){ meta = 'away'+(p.last_seen_ms? (' · seen '+fmtAgo(p.last_seen_ms)) : ' · not seen yet'); }
+    else if(!p.enabled){ meta = p.note ? esc(p.note) : 'register when home'; }
+    else { meta = 'register when home'; }
+    var label = p.registered ? 'Change' : 'Register';
+    var cls = p.registered ? 'presence-reg change' : 'presence-reg';
+    var btn='<button class="'+cls+'" '+(writable?'':'disabled')+' onclick="acRegister(\''+p.slot+'\')">'+label+'</button>';
+    return '<div class="presence-row"><span class="presence-dot '+dotCls+'"></span>'+
+           '<span class="presence-name">'+esc(p.name)+tag+'</span>'+
+           '<span class="presence-meta">'+meta+'</span>'+btn+'</div>';
+  }).join('');
+}
+
+function slotName(slot){
+  var pr=presence.data; if(!pr) return slot;
+  var p=(pr.people||[]).filter(function(x){return x.slot===slot;})[0];
+  return p?p.name:slot;
+}
+function slotMac(slot){
+  var pr=presence.data; if(!pr) return null;
+  var p=(pr.people||[]).filter(function(x){return x.slot===slot;})[0];
+  return (p&&p.mac)?p.mac:null;
+}
+function acRegister(slot){
+  if(!acIsWritable()) return;
+  candidates.forSlot=slot; candidates.scanning=true; candidates.data=null; candidates.registering=null;
+  $('candBox').classList.add('show');
+  reader.publish('bsf/presence/cmd', JSON.stringify({action:'scan', source:'dashboard'}), 0);
+  renderCandidates();
+}
+function renderCandidates(){
+  var box=$('candBox'); if(!box) return;
+  if(!candidates.forSlot){ box.classList.remove('show'); return; }
+  var name=slotName(candidates.forSlot), hd=$('candHd');
+  if(candidates.registering){
+    hd.innerHTML='Registering <b>'+esc(candidates.registering)+'</b> to <b>'+esc(name)+'</b>…';
+    $('candRows').innerHTML=''; return;
+  }
+  var curMac=slotMac(candidates.forSlot);
+  var cur = curMac ? '<div class="cand-empty" style="text-align:left">Currently: <b style="color:var(--ink)">'+esc(curMac)+'</b> · <span style="color:var(--red);cursor:pointer;text-decoration:underline" onclick="acUnregister(\''+candidates.forSlot+'\')">remove</span></div>' : '';
+  hd.innerHTML='Tap the device that is <b>'+esc(name)+'</b>’s phone — make sure that phone is on the BSF WiFi right now. '+
+               '📱 marks a private-Wi-Fi (randomized) address, which is what a modern phone uses.'+cur;
+  var rows;
+  if(candidates.scanning && !candidates.data){ rows='<div class="cand-empty">Scanning the network…</div>'; }
+  else {
+    var list=(candidates.data&&candidates.data.candidates)||[];
+    if(!list.length){ rows='<div class="cand-empty">No unregistered devices seen in the last minute.<br>Unlock the phone, confirm it’s on WiFi, then tap Rescan.</div>'; }
+    else rows=list.map(function(c){
+      var ic=c.randomized?'📱':'•';
+      var seen=(c.last_seen_s<=2?'now':(c.last_seen_s+'s ago'));
+      return '<div class="cand-row '+(c.randomized?'phone':'')+'" onclick="acPickCandidate(\''+c.mac+'\')">'+
+        '<span class="cand-ic">'+ic+'</span>'+
+        '<span class="cand-main"><div class="cand-mac">'+esc(c.mac)+'</div><div class="cand-vend">'+esc(c.vendor)+'</div></span>'+
+        '<span class="cand-meta">'+esc(c.ip)+'<br>'+seen+'</span></div>';
+    }).join('');
+  }
+  $('candRows').innerHTML=rows;
+}
+function acPickCandidate(mac){
+  if(!acIsWritable()||!candidates.forSlot) return;
+  candidates.registering=mac;
+  reader.publish('bsf/presence/cmd', JSON.stringify({action:'register', slot:candidates.forSlot, mac:mac, source:'dashboard'}), 0);
+  renderCandidates();
+  setTimeout(function(){ if(candidates.registering===mac) acCloseCand(); }, 5000); // fail-safe close
+}
+function acUnregister(slot){
+  if(!acIsWritable()) return;
+  reader.publish('bsf/presence/cmd', JSON.stringify({action:'unregister', slot:slot, source:'dashboard'}), 0);
+  acCloseCand();
+}
+function acRescan(){
+  if(!acIsWritable()||!candidates.forSlot) return;
+  candidates.scanning=true; candidates.data=null;
+  reader.publish('bsf/presence/cmd', JSON.stringify({action:'scan', source:'dashboard'}), 0);
+  renderCandidates();
+}
+function acCloseCand(){
+  candidates.forSlot=null; candidates.registering=null; candidates.scanning=false;
+  var b=$('candBox'); if(b) b.classList.remove('show');
+}
+
+function render(snap){
+  var hw=snap.hw, ac=snap.ac;
+  // metrics
+  var pv=hw?num(hw.pv_total):null, soc=hw?num(hw.soc):(ac?num(ac.soc):null),
+      sur=hw?num(hw.surplus_now):null, hwDraw=hw?num(hw.plug_power):null,
+      acLoad=hw?num(hw.ac_load):(ac?num(ac.ac_load):null), batt=hw?num(hw.batt_power):null;
+  // Load attribution from the relay (live only, fresh < 2 min): break the hot
+  // water + air-con draws out of the lumped Cerbo "ac_load" essential bucket.
+  var loads = (snap.live && relayLoads.data && (Date.now()-relayLoads.recv)<120000) ? relayLoads.data : null;
+  var hwStale = !!(loads && loads.hot_water_state==='stale');
+  // hot_water_estimated: the plug meter is stale but the dispatcher has HW commanded
+  // ON, so the relay reports the element nominal (~1.6 kW) as a stand-in. Show that
+  // value (marked ≈) instead of "—" so the figure stops flip-flopping between the HW
+  // tile and Essentials every time the Tuya plug's bursty heartbeat lapses.
+  var hwEst   = !!(loads && loads.hot_water_estimated);
+  var acStale = !!(loads && loads.ac_state==='stale');
+  // ac_estimated: same anti-flip as HW but for the Daikin — meter stale yet A/C still
+  // commanded on, so we hold its last reported draw (marked ≈) instead of dropping it
+  // back into Essentials.
+  var acEst   = !!(loads && loads.ac_estimated);
+  var hwW  = (loads && loads.hot_water_w!=null) ? loads.hot_water_w : hwDraw;
+  var acW  = (loads && loads.ac_w!=null) ? loads.ac_w : null;
+  var essW = (loads && loads.essential_other_w!=null) ? loads.essential_other_w : (hw?num(hw.ac_other):acLoad);
+  // pv_dc / pv_fronius split — from hw (HTTP mode, same snapshot as pv_total) or the
+  // relay backfill (MQTT mode, where hw off the broker has no split). Never the dead
+  // 258/259 mppt288_power/mppt289_power fields (permanently 0) — that was misleading.
+  var pvRelay = (snap.live && relayPv.recv && (Date.now()-relayPv.recv)<120000) ? relayPv : null;
+  var pvdc   = (hw&&hw.pv_dc!=null) ? num(hw.pv_dc) : (pvRelay?num(pvRelay.pv_dc):null);
+  var pvfron = (hw&&hw.pv_fronius!=null) ? num(hw.pv_fronius) : (pvRelay?num(pvRelay.pv_fronius):null);
+  $('m_pv').textContent=W(pv); $('m_soc').textContent=(soc===null?'–':soc);
+  $('m_sur').textContent=signW(sur);
+  // HW figure: '—' ONLY when we truly don't know (meter stale AND not commanded on).
+  // When estimated, show the element-rating stand-in marked ≈; raw status goes in the sub.
+  $('m_hw').textContent=(hwStale&&!hwEst)?'—':(hwEst?'≈':'')+W(hwW);
+  var hwSub=$('m_hw_sub');
+  if(hwSub) hwSub.textContent = hwEst ? '≈ element · meter stale'
+                              : (hwStale ? 'meter stale'
+                              : ((loads&&loads.hot_water_metered) ? 'metered plug' : 'plug'));
+  $('m_ac').textContent=W(acLoad); $('m_batt').textContent=signW(batt);
+  if(pvdc!==null || pvfron!==null) $('m_pv_sub').textContent='DC '+W(pvdc)+' + Fronius '+W(pvfron);
+  else $('m_pv_sub').textContent='total array output';
+  $('m_soc_sub').textContent = soc===null?' ':(soc>=95?'full · curtail-likely':(soc>=CFG.SOC_ON?'above on-gate':(soc>=CFG.SOC_OFF?'between gates':'below floor')));
+  $('m_batt_sub').textContent = batt===null?'+chg / −dis':(batt>=0?'charging':'discharging');
+
+  // commanded load states (computed early so diagram values can use them)
+  var hwOn=!!(hw&&hw.hwState==='on'), acOn=!!(ac&&ac.acState==='on');
+  // diagram values — v5: DC MPPT box shows pv_dc, Fronius box shows pv_fronius
+  // (pvdc / pvfron computed above with relay backfill for MQTT mode).
+  if($('d_totsolar')) $('d_totsolar').textContent=W(pv)+' W';   // Total Solar tile = pv_total (DC + Fronius)
+  $('d_pv').textContent=W(pvdc)+' W';
+  if($('d_fron')) $('d_fron').textContent=W(pvfron)+' W';
+  $('d_soc').textContent=(soc===null?'–':soc+'%');
+  $('d_batt').textContent=signW(batt)+' W';
+  $('d_batt2').textContent=batt===null?' ':(batt>=0?'charging':'discharging');
+  $('d_ess').textContent=W(essW)+' W';
+  $('d_sur').textContent=signW(sur)+' W';
+  $('d_hw').textContent=((hwStale&&!hwEst)?'—':(hwEst?'≈ ':'')+W(hwW))+' W';
+  // Air-con: metered plug draw when fresh; the held last-draw (marked ≈) when the meter
+  // is stale but the unit is still on; "—" only when stale AND we have no held value;
+  // and only fall back to the lumped figure when there's no relay at all.
+  $('d_ac').textContent = (acStale && !acEst) ? '— W'
+                        : (acEst ? '≈ '+W(acW)+' W'
+                        : (acW!=null ? W(acW)+' W'
+                        : (acOn ? W(acLoad)+' W' : '0 W')));
+
+  // ---- TOTAL AC OUTPUT reconciliation (display-only AC-bus balance) ----
+  // The AC bus has two sources: Fronius (measured pv_fronius) + the inverter's DC→AC
+  // discharge. There is NO measured inverter-AC field in the published state, so the
+  // inverter side is DERIVED from the bus balance: invDisch = max(0, household − Fronius).
+  //   Total AC Output = Fronius + invDisch = max(Fronius, household).
+  // Conservation says it must equal where the AC goes:
+  //   Essential + HW + A/C + AC-surplus-to-battery,  surAC = max(0, Fronius − household).
+  // Δ = Total − sinkSum is ≈0 by construction; it only departs from 0 when the load
+  // attribution is inconsistent (a stale/biased plug → essential clamped, attribution_mismatch)
+  // — exactly the visible cross-check requested. surplus_now (DC+AC) is UNTOUCHED in its own
+  // "Surplus Power" readout; the AC-only surplus used here is the smaller number.
+  (function(){
+    var box=$('totac_box'), vEl=$('d_totac'), cEl=$('d_totac_chk'), sEl=$('d_totac_src');
+    if(!vEl) return;
+    var rcFron=pvfron, rcLoad=acLoad;
+    var rcEss=(loads&&loads.essential_other_w!=null)?num(loads.essential_other_w):null;
+    var rcHw =(loads&&loads.hot_water_w!=null)?num(loads.hot_water_w):null;
+    var rcAc =(loads&&loads.ac_w!=null)?num(loads.ac_w):null;
+    var ready = rcFron!==null && rcLoad!==null && rcEss!==null && rcHw!==null && rcAc!==null;
+    if(!ready){
+      vEl.textContent='– W'; sEl.textContent='needs live meters';
+      cEl.textContent='–'; cEl.setAttribute('fill','#7c8aa6');
+      if(box){ box.classList.remove('warn'); var t0=box.querySelector('title'); if(t0) t0.textContent='Total AC Output — reconciliation needs the live load meters'; }
+      return;
+    }
+    var totalAC = Math.max(rcFron, rcLoad);
+    var invDisch= Math.max(0, rcLoad - rcFron);   // inverter DC→AC (covers load deficit)
+    var surAC   = Math.max(0, rcFron - rcLoad);    // AC surplus → battery (inverter charge)
+    var sinkSum = rcEss + rcHw + rcAc + surAC;
+    var delta   = Math.round(totalAC - sinkSum);
+    var TOL     = 20;   // ±W tolerance for "balanced"
+    var bad     = Math.abs(delta) > TOL || !!(loads && loads.attribution_mismatch);
+    vEl.textContent = W(totalAC)+' W';
+    sEl.textContent = 'Fronius '+W(rcFron)+' + Inv '+W(invDisch);
+    cEl.textContent = (bad?'⚠ Δ ':'✓ Δ ')+(delta===0?'0':signW(delta))+' W';
+    cEl.setAttribute('fill', bad?'#f0b364':'#34d399');
+    if(box){
+      box.classList.toggle('warn', bad);
+      var t=box.querySelector('title');
+      if(!t){ t=document.createElementNS('http://www.w3.org/2000/svg','title'); box.appendChild(t); }
+      t.textContent='Total AC '+W(totalAC)+' W = Ess '+W(rcEss)+' + HW '+W(rcHw)+' + A/C '+W(rcAc)+' + →Batt '+W(surAC)+' = '+W(sinkSum)+' W  (Δ '+signW(delta)+' W)';
+    }
+  })();
+
+  // attribution mismatch (meters disagree → essential clamped at 0): surface it raw.
+  var essWarn=$('essWarn');
+  if(essWarn){
+    if(loads && loads.attribution_mismatch){ essWarn.textContent='⚠ attribution mismatch'; essWarn.style.display=''; }
+    else { essWarn.textContent=''; essWarn.style.display='none'; }
+  }
+  // SOC ring
+  var ringLen=163.4, frac=(soc===null?0:Math.max(0,Math.min(100,soc))/100);
+  var ring=$('socRing'); ring.setAttribute('stroke-dashoffset', ringLen*(1-frac));
+  // SOC ring colour = battery-chemistry health band (red <= danger, amber < warn, else green).
+  ring.setAttribute('stroke', soc===null?'#22304a':(soc<=CFG.socDanger?'#ef4444':(soc<CFG.socWarn?'#f5b62e':'#34d399')));
+
+  // load on/off
+  toggleLoad('hw',hwOn); toggleLoad('ac',acOn);
+
+  // ============================================================
+  // PHYSICAL FLOW MODEL — every particle rides a real wire SEGMENT, and a segment
+  // lights iff SOME live source→sink PATH carries current through it, in that path's
+  // direction. The diagram is a schematic, not decoration: a lit dot = current is
+  // flowing there right now. The "Surplus pool" box is a READOUT only — no path
+  // sources from it. TH kills sub-threshold jitter. (Display-only; dispatcher untouched.)
+  //
+  // SEGMENT REGISTRY  (segment → SVG connector id → diagram position):
+  //   dcA   c_sun_arr   sun → DC-MPPT top (…→180,22)         DC PV, sun side
+  //   dcB   c_arr_bat   DC-MPPT → battery (180,70→116)       DC PV → battery (DC side)
+  //   frA   c_sun_fron  sun → Fronius (…→-41,122)            Fronius PV, sun side
+  //   frB   c_fron_bus  Fronius → AC bus@95 (-41,168→268→95) Fronius → bus
+  //   ivB   c_bat_inv   battery ↔ inverter (180,202↔214)      ┐ REVERSIBLE INVERTER UNIT:
+  //   ivU   c_inv_bus   inverter ↔ AC bus@180 (180,248↔268)   │ vertical pair + busL form one
+  //   busL  c_sur_ess   AC bus 95↔180 (inverter↔distribution) ┘ L-flow that FLIPS TOGETHER
+  //   busR  c_busR      AC bus 180↔265 (inverter/Fronius → HW/AC)  ONE-WAY (HW/AC are sinks)
+  //   essD  c_bus_ess   bus@95 → (thru Total AC band) → Essential box (95,268→368)  one-way (sink)
+  //   surD  c_bus_sur   bus@265 → (thru Total AC band) → Surplus box top (265,268→368)  one-way  ┐ shared
+  //   surT  c_sur_trunk box bottom → HW/AC branch (265,418→442)  one-way (HW/AC feed)  ┘ feed
+  //   hwD   c_sur_hw    branch → Hot-water box (265,442→95→476)  one-way (sink)
+  //   acD   c_sur_ac    branch → Air-con box   (265,442→476)     one-way (sink)
+  //   dcA/dcB/frA/frB                                          one-way (PV sources)
+  //
+  // The AC bus is a 3-tap node: LEFT 95 (Fronius-in + Essential-out), MID 180
+  // (inverter in/out), RIGHT 265 (HW/AC distribution). The ONLY reversible segments are
+  // the inverter unit — battery↔inverter (vertical) + inverter↔distribution (busL,
+  // horizontal). They flip together with the inverter; everything else is one-way (an
+  // electron can only travel one way in those physical wires). busR + all drops are sinks;
+  // the PV feeds are sources.
+  // ============================================================
+  var TH=20;   // watts — below this a path reads as idle, not flowing
+
+  // ---- PRODUCTION SOURCES & inverter direction (raw dispatcher reads, unchanged) ----
+  // DC PV (MPPT-288/289 + RS1/2) flows INTO the battery node whenever it produces — the
+  // battery node sums DC-PV inflows against discharge outflow, so net batt sign is irrelevant
+  // to whether DC electrons are arriving. Gate on the SOURCE alone (pvdc>TH), NOT on batt>TH:
+  // at low sun the loads can out-pace DC PV (battery net-discharging) while DC PV is still
+  // flowing in. The battery↔inverter discharge path below lights independently on its own sign.
+  var dcOn   = pvdc!==null && pvdc>TH;                                // DC PV producing (→ battery node)
+  var fronOn = pvfron!==null && pvfron>TH;                            // Fronius (AC-coupled) producing → bus
+  // invNet = the AC the inverter must source from DC = house load − Fronius.
+  //   invNet > 0 → battery/DC → inverter → bus (discharge / DC pass-through)  [dots DOWN]
+  //   invNet < 0 → bus → inverter → battery (store AC surplus)                [dots UP]
+  // Reverse-charge is never inferred (needs the split); discharge falls back to batt<−TH.
+  var invNet  = (acLoad!==null && pvfron!==null) ? (acLoad - pvfron) : null;
+  var invDown = (invNet!==null && invNet>TH) || (invNet===null && batt!==null && batt< -TH);
+  var invUp   = invNet!==null && invNet< -TH && batt!==null && batt>TH;
+  // ---- CONSUMPTION SINKS ----
+  var essOn = essW!==null && essW>TH;          // essential base draw (>20 W)
+  // hwOn / acOn computed earlier from hwState/acState.
+
+  // ---- PATH P_DC · DC PV → battery (segs dcA→, dcB↓). Both MPPT-288/289 and RS1/2
+  //      are DC-coupled and feed the battery node; the diagram's single DC column carries
+  //      their combined current (per-charger split lives in the tap-to-drill panel). Lights
+  //      on pvdc>TH ALONE — sun→MPPT and MPPT→battery flow whenever DC PV produces, even
+  //      while the battery is net-discharging (loads > PV). Direction is always DOWN (into
+  //      the battery node); the discharge OUT of the node is the inverter unit below. ----
+  setFlow('c_sun_arr',dcOn,'gen'); setFlow('c_arr_bat',dcOn,'gen');
+  $('p_gen').classList.toggle('on',dcOn); $('p_gen2').classList.toggle('on',dcOn);
+
+  // ---- PATH P_FRON · Fronius → AC bus@95 (segs frA↓, frB↓→). Feeds the bus directly,
+  //      bypassing the battery, whenever producing. ----
+  setFlow('c_sun_fron',fronOn,'fron'); setFlow('c_fron_bus',fronOn,'fron');
+  if($('p_fron_in')) $('p_fron_in').classList.toggle('on',fronOn);
+  if($('p_fron_out')) $('p_fron_out').classList.toggle('on',fronOn);
+
+  // ---- REVERSIBLE INVERTER UNIT — the battery↔inverter VERTICAL pair (ivB, ivU) AND the
+  //      inverter↔distribution HORIZONTAL run (busL = c_sur_ess) flip direction TOGETHER on
+  //      the inverter, because the inverter just passes power between the DC side and the AC
+  //      bus. One L-shaped flow that reverses as a unit:
+  //        invDown (discharge): battery → inverter → bus, then busL carries inverter→essentials.
+  //        invUp   (AC charge): Fronius/bus → busL → inverter → battery (store surplus).
+  //      direction = sign(invNet) (invNet = house load − Fronius). Each segment still lights
+  //      only when it actually carries current — busL needs a draw at its distribution end
+  //      (essentials when discharging, Fronius when charging), so a dead wire stays dark. ----
+  var invRev = invUp;   // the single flag that flips the whole unit (charge = reversed)
+  // vertical pair: base path DOWN (battery→bus); .rev (UP) when charging.
+  setFlow('c_bat_inv', invDown||invUp, invUp?'chg':'dis', invRev);
+  setFlow('c_inv_bus', invDown||invUp, invUp?'chg':'dis', invRev);
+  $('p_dis').classList.toggle('on',invDown); $('p_dis2').classList.toggle('on',invDown);
+  $('p_chg_ac').classList.toggle('on',invUp);
+  // horizontal half (busL): base path RIGHT (95→180 = toward inverter = the CHARGE dir, so
+  // it mirrors the vertical pair's base-DOWN). .rev (LEFT, 180→95) is the DISCHARGE dir
+  // (inverter→essentials). Thus busL's rev is the inverse of the vertical's, and the L-flow
+  // reads as one unit flipping together. busL also carries the one-way Fronius→HW/AC
+  // pass-through (rightward, no inverter involved) — additive, same base direction.
+  var busL_left  = invDown && essOn;                       // DISCHARGE: inverter → essentials (180→95)
+  var busL_right = invUp                                   // CHARGE: Fronius/bus → inverter (95→180) …
+                || (fronOn && !invDown && (hwOn||acOn));   // … or Fronius → HW/AC pass-through (one-way)
+  setFlow('c_sur_ess', busL_left||busL_right, null, busL_left);   // base 95→180; rev ⇒ 180→95
+  $('p_busL_l').classList.toggle('on', busL_left);
+  $('p_busL_r').classList.toggle('on', busL_right);
+  // inverter text cue reports the BATTERY's own net (charge/discharge) by batt sign;
+  // direction is carried by the ↑/↓ arrow + dot motion, so the cue is the same warm-yellow.
+  var charging = batt!==null && batt>=0;
+  var cueEl=$('inv_cue');
+  if(cueEl){ cueEl.textContent = batt===null?'' : (charging?'↑ chg':'↓ load');
+    cueEl.setAttribute('fill', '#f5b62e'); }
+
+  // ---- PATH P_ESS · essential draw drop (seg essD↓, ONE-WAY into the box). Lights whenever
+  //      essentials draw; the SOURCE is shown by busL above, never the pool box. ----
+  setFlow('c_bus_ess', essOn);
+  $('p_ess').classList.toggle('on',essOn);
+
+  // ---- busR (180↔265): ONE-WAY, always RIGHTWARD — HW/AC are sinks at 265, every source is
+  //      at ≤180 (the inverter, or Fronius via busL). It never reverses. ----
+  var busR_on = hwOn || acOn;
+  setFlow('c_busR', busR_on);
+  $('p_busR').classList.toggle('on', busR_on);
+
+  // ---- PATHS P_HW / P_AC · bus → (past Surplus readout) → loads. The feed is SHARED until the
+  //      branch at (265,360): c_bus_sur (bus→box top) + c_sur_trunk (box bottom→branch) both carry
+  //      the HW+AC current, so both gate on busR_on (hwOn||acOn). Then the per-load branches split:
+  //      c_sur_hw (→HW) on hwOn, c_sur_ac (→AC) on acOn. ----
+  setFlow('c_bus_sur', busR_on);                       // bus → into the distribution (feed)
+  $('p_bus_sur').classList.toggle('on', busR_on);
+  setFlow('c_sur_trunk', busR_on);                     // shared trunk under the readout box (HW+AC feed)
+  $('p_sur_trunk').classList.toggle('on', busR_on);
+  setFlow('c_sur_hw',hwOn,'hw'); $('p_hw').classList.toggle('on',hwOn);
+  setFlow('c_sur_ac',acOn,'ac'); $('p_ac').classList.toggle('on',acOn);
+  // per-charger drill-down — hw.chargers fed by the relay (native Victron MQTT)
+  renderDrill(hw, snap.live);
+
+  // LOCKOUT ring + reason banner
+  var lock = lockoutReason(hw,ac);
+  $('diagramWrap').classList.toggle('lockout', !!lock);
+  var lb=$('lockBadge'); lb.classList.toggle('show', !!lock);
+  if(lock) lb.textContent='⛔ LOCKOUT — '+lock;
+
+  // gate cards
+  renderGates('hwGates', hwGates(hw)); renderGates('acGates', acGates(ac));
+  renderAcControl(state.ac);   // always reflects LIVE thresholds, never the scrubbed history view
+  renderAcMode(state.ac); renderPresence();   // v1.11 mode switch + presence list (always live)
+  setLoadState('hwState', hw?hw.hwState:null, hwGates(hw));
+  setLoadState('acState', ac?ac.acState:null, acGates(ac));
+
+  // stale banner (connection + per-feed)
+  paintStale(snap);
+
+  // sky band — sun + moon for the displayed instant (live = now, scrub = sample ts)
+  updateSky(snap.live ? Date.now() : snap.ts);
+
+  // 7-day "This week" tiles — independent of this snapshot (always the live week)
+  renderWeekly();
+}
+
+function lockoutReason(hw,ac){
+  if(hw){
+    if((hw.stale||[]).length) return 'telemetry stale: '+hw.stale.join(', ');
+    if(hw.mode==='LOCKOUT'){
+      var soc=num(hw.soc);
+      if(soc!==null && soc<CFG.SOC_OFF) return 'SOC '+soc+'% below 75% floor';
+      return 'outside dispatch window (sunrise → sunset−2h)';
+    }
+  } else if(ac){
+    if(ac.window==='LOCKOUT') return 'outside dispatch window';
+  }
+  return null;
+}
+
+function toggleLoad(which,on){
+  var box=$('load_'+which), badge=$('b_'+which);
+  box.classList.toggle('on',!!on); badge.classList.toggle('on',!!on);
+  badge.textContent=on?'● ON':'OFF';
+}
+function setFlow(id,on,cls,rev){ var e=$(id); if(!e)return;
+  e.classList.toggle('flowing',!!on);
+  e.classList.toggle('rev',!!(on&&rev));
+  if(cls){ ['gen','hw','ac','fron','chg','dis'].forEach(function(c){ if(c!==cls) e.classList.remove(c); }); if(on) e.classList.add(cls); }
+}
+
+/* ---- MPPT drill-down (tap the DC MPPT box) ---- */
+var drillOpen=false;
+function toggleDrill(){ drillOpen=!drillOpen; var d=$('drill'); if(d) d.classList.toggle('open', drillOpen); }
+function renderDrill(hw, live){
+  // hw.chargers = {m288,m289,rs1,rs2} (watts) is fed by the relay from the native
+  // Victron MQTT tree — NEVER the dead 258/259 fake-0 the dispatcher still carries.
+  // HTTP mode: hw carries it. MQTT mode: backfill from the relay snapshot (relayChargers).
+  var c = (hw && hw.chargers && typeof hw.chargers==='object') ? hw.chargers
+        : (live && relayChargers.data && (Date.now()-relayChargers.recv)<120000 ? relayChargers.data : null);
+  function val(k){ return (c && num(c[k])!==null) ? W(c[k])+' W' : '—'; }
+  if($('dd_288')) $('dd_288').textContent=val('m288');
+  if($('dd_289')) $('dd_289').textContent=val('m289');
+  if($('dd_rs1')) $('dd_rs1').textContent=val('rs1');
+  if($('dd_rs2')) $('dd_rs2').textContent=val('rs2');
+  var tb=$('throtbar'), dot=$('mppt_throt'); if(!tb) return;
+  if(!c){ tb.className='throtbar'; tb.textContent='⏳ Per-charger feed lands in Phase 3 — individual MPPT / RS values aren’t published yet.'; if(dot) dot.classList.remove('on'); return; }
+  var mppt=(num(c.m288)||0)+(num(c.m289)||0), rs=(num(c.rs1)||0)+(num(c.rs2)||0);
+  var throttling = mppt<30 && rs>150;
+  // Curtailment reasons OTHER than the MPPT-differential one this banner already explains,
+  // so the per-charger view stops appearing to contradict the PV-headroom gate. ('MPPT backed-off'
+  // is the dispatcher's mppt_curtailed; this banner has its own RS-differential throttling check.)
+  var otherReasons = curtailReasons(hw).filter(function(r){ return r!=='MPPT backed-off'; });
+  var otherNote = otherReasons.length ? ' Curtailment IS firing via '+otherReasons.join(' + ')+' — see the PV-headroom gate.' : '';
+  if(throttling){ tb.className='throtbar'; tb.textContent='⚠ MPPTs curtailed ('+W(mppt)+' W) while RS still producing ('+W(rs)+' W) — battery full, DC backed off.'; }
+  else if(mppt+rs<20){ tb.className=otherNote?'throtbar info':'throtbar clear'; tb.textContent='○ No DC production (night / no sun).'+otherNote; }
+  else if(otherNote){ tb.className='throtbar info'; tb.textContent='✓ DC chargers healthy — not the curtailment source.'+otherNote; }
+  else { tb.className='throtbar clear'; tb.textContent='✓ All DC chargers producing — not curtailed.'; }
+  if(dot) dot.classList.toggle('on', throttling);
+}
+
+function setLoadState(id, st, gates){
+  var el=$(id); el.className='st '+(st==='on'?'on':'off');
+  if(st==='on'){ el.textContent='● ON'; return; }
+  // OFF: arming if all gates pass but not yet on (sustain window)
+  var allPass = gates.length && gates.every(function(g){return g.pass;});
+  if(allPass){ el.className='st arming'; el.textContent='ARMING…'; }
+  else { el.className='st off'; el.textContent='OFF'; }
+}
+
+function renderGates(containerId, gates){
+  var c=$(containerId);
+  if(!gates.length){ c.innerHTML='<div class="empty">No data yet.</div>'; return; }
+  c.innerHTML=gates.map(function(g){
+    var cls = g.unknown ? 'unknown' : (g.pass?'pass':'fail');
+    var mk = g.unknown ? '?' : (g.pass?'✓':'✗');
+    return '<div class="gate '+cls+'"><span class="mk">'+mk+'</span>'+
+      '<div class="gk">'+esc(g.k)+'</div>'+
+      '<div class="gv">'+esc(g.v)+'</div>'+
+      '<div class="gt">'+esc(g.t)+'</div></div>';
+  }).join('');
+}
+function esc(s){ return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+
+/* ---- weekly ("This week") aggregates ----------------------------------------
+   Rolling 7-day stats computed by the relay (snap.weekly) and carried in
+   relayWeekly. These are display-only summaries of numbers the dispatcher already
+   publishes; they're independent of the live/scrub snapshot, so they keep showing
+   the week even while the Time Machine is scrubbed. */
+function fmtKwh(x){ var n=num(x); if(n===null) return '–'; return n>=100?String(Math.round(n)):n.toFixed(1); }
+function fmtHrs(x){ var n=num(x); if(n===null) return '–'; return n>=10?String(Math.round(n)):n.toFixed(1); }
+function renderWeekly(){
+  var w=relayWeekly.data;
+  function txt(id,v){ var e=$(id); if(e) e.textContent=v; }
+  if(!w){
+    ['wk_soc','wk_dis','wk_minsoc','wk_solar','wk_hw','wk_full','wk_ac','wk_ess'].forEach(function(id){ txt(id,'–'); });
+    txt('wk_hw_sub','– kWh'); txt('wk_ac_sub','– kWh'); txt('wk_note','waiting for relay…');
+    renderCurtail(null);
+    return;
+  }
+  txt('wk_soc',   w.avg_soc==null ? '–' : w.avg_soc);
+  txt('wk_dis',   w.max_discharge_w==null ? '–' : ('−'+W(w.max_discharge_w)));
+  txt('wk_minsoc',w.min_soc==null ? '–' : w.min_soc);
+  txt('wk_solar', fmtKwh(w.solar_kwh));
+  txt('wk_hw',    fmtHrs(w.hw_hours));
+  txt('wk_hw_sub',(w.hw_kwh==null ? '–' : fmtKwh(w.hw_kwh))+' kWh');
+  txt('wk_full',  fmtHrs(w.full_hours));
+  txt('wk_ac',    fmtHrs(w.ac_hours));
+  txt('wk_ac_sub',(w.acond_kwh==null ? '–' : fmtKwh(w.acond_kwh))+' kWh');
+  txt('wk_ess',   w.ess_other_kwh==null ? '–' : fmtKwh(w.ess_other_kwh));
+  // honest coverage note: the 7-day store builds up over a week of running
+  var cov=num(w.coverage_h), covTxt;
+  if(cov===null) covTxt='rolling 7-day';
+  else if(cov>=48) covTxt='rolling 7-day · '+(Math.round(cov/24*10)/10)+'d captured';
+  else covTxt='rolling 7-day · '+Math.round(cov)+'h captured';
+  txt('wk_note',covTxt);
+  renderCurtail(w);
+}
+
+/* ---- curtailment summary (Phase A) ------------------------------------------
+   Forward-tracked from the canonical MppOperationMode throttle (relay snap.weekly).
+   curt_hours / curt_pct (% of tracked daylight) are EXACT; foregone_kwh is a rough
+   demonstrated-ceiling estimate. Per-tracker bars scale to tracked daylight so a
+   tracker throttled the whole daylight window reads a full bar. */
+var CURT_TRK=[['MPPT-288','m288'],['MPPT-289','m289'],['RS Solar 1','rs1'],['RS Solar 2','rs2']];
+function fmtH1(x){ var n=num(x); return n===null?'–':n.toFixed(1); }   // always 1 dp (keeps 11.9 vs 12.1 distinct)
+function renderCurtail(w){
+  function txt(id,v){ var e=$(id); if(e) e.textContent=v; }
+  var box=$('curt_trk');
+  var trackH = w?num(w.curt_track_h):null;
+  if(!w || trackH===null || trackH<0.05){
+    txt('curt_cov', w?'tracking since restart':'waiting for relay…');
+    txt('curt_h','–'); txt('curt_pct',''); txt('curt_kwh','–');
+    if(box) box.innerHTML='<div class="curt-none">Building the canonical curtailment picture — the per-tracker throttle clock starts at relay restart and fills in over the next hour.</div>';
+    return;
+  }
+  var trk=w.curt_trackers||{}, dayH=num(w.daylight_h)||0;
+  txt('curt_h', fmtH1(w.curt_hours));
+  // only surface the % once there's a meaningful daylight denominator (>=1h tracked),
+  // else the ratio is noisy (e.g. "100% of daylight" off the first 12 min since restart).
+  txt('curt_pct', (w.curt_pct!=null && dayH>=1) ? ('· '+w.curt_pct+'% of daylight') : '');
+  txt('curt_kwh', fmtKwh(w.foregone_kwh));
+  txt('curt_cov', trackH>=48 ? ('rolling 7-day · '+(Math.round(trackH/24*10)/10)+'d tracked')
+                  : (trackH<1 ? ('tracked '+Math.round(trackH*60)+' min') : ('tracked '+(Math.round(trackH*10)/10)+'h')));
+  // scale bars to the larger of tracked-daylight or the busiest tracker, so bars stay readable early
+  var maxTrk=Math.max(num(trk.m288)||0,num(trk.m289)||0,num(trk.rs1)||0,num(trk.rs2)||0);
+  var scale=Math.max(dayH, maxTrk, 0.1);
+  if(box) box.innerHTML=CURT_TRK.map(function(r){
+    var hv=num(trk[r[1]]); if(hv===null) hv=0;
+    var pct=Math.max(0,Math.min(100, hv/scale*100));
+    return '<div class="ctk"><span class="ctk-k">'+r[0]+'</span>'
+         + '<span class="ctk-bar"><i style="width:'+pct.toFixed(0)+'%"></i></span>'
+         + '<span class="ctk-v">'+fmtH1(hv)+' h</span></div>';
+  }).join('');
+}
+
+/* ---- node detail cards (Phase C) --------------------------------------------
+   Tap any Energy-Flow node → a modal with its time-series. Live/Day come from the
+   same 24h `samples` history; Week/Month/Year from the relay's per-day archive
+   (history.daily). Display-only. Chart: bars (rate/energy) + cumulative line +
+   a red curtailment band at the bottom. Build pattern is config-driven (NODES). */
+var detailDaily=[];                 // per-day archive rows (history.daily)
+var DETAIL={node:null, res:'day'};
+var NODES={
+  sun:  {ic:'☀️',title:'Total Solar',sub:'DC MPPT + Fronius',kind:'power',gen:true,sample:function(h){return h?num(h.pv_total):null;},daily:'solar_kwh'},
+  dc:   {ic:'🔆',title:'DC MPPT',sub:'BlueSolar 288/289 + RS 1/2',kind:'power',gen:true,sample:function(h){return h?num(h.pv_dc):null;},daily:'dc_kwh',pc:true},
+  fron: {ic:'⚡',title:'Fronius · AC',sub:'AC-coupled, bypasses battery',kind:'power',gen:true,sample:function(h){return h?num(h.pv_fronius):null;},daily:'fron_kwh'},
+  batt: {ic:'🔋',title:'Battery',sub:'lead-acid bank',kind:'soc',sample:function(h){return h?num(h.soc):null;},daily:'avg_soc'},
+  ess:  {ic:'🏠',title:'Household Load',sub:'Cerbo AC bus',kind:'power',sample:function(h){return h?num(h.ac_load):null;},daily:'load_kwh'},
+  sur:  {ic:'➕',title:'Surplus',sub:'PV − household',kind:'power',gen:true,sample:function(h){return h?num(h.surplus_now):null;},daily:'sur_kwh',signed:true},
+  hw:   {ic:'🔥',title:'Hot Water',sub:'1.6 kW element',kind:'run',sample:function(h){return h?(h.hwState==='on'?1:0):null;},daily:'hw_h'},
+  ac:   {ic:'❄️',title:'Air-con',sub:'Daikin FTXZ25',kind:'run',acState:true,daily:null}
+};
+var RESES=[['live','Live'],['day','Day'],['week','Week'],['month','Month'],['year','Year']];
+function nodeKindUnit(node){ return node.kind==='soc'?'%':(node.kind==='run'?'':'W'); }
+function seriesColor(node){ return node.kind==='soc'?'var(--green)':(node.kind==='run'?'var(--amber)':'var(--gold)'); }
+function nodeSampleVal(node,s){ return node.acState ? ((s.ac&&s.ac.acState)?(s.ac.acState==='on'?1:0):null) : node.sample(s.hw); }
+function resIsMulti(r){ return r==='week'||r==='month'||r==='year'; }
+function nodeHasMulti(node){ return node.kind==='soc' || !!node.daily; }
+
+function loadDaily(){
+  var urls=['/solar/history','history.json'];
+  (function go(i){ if(i>=urls.length) return;
+    fetch(urls[i],{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(h){ if(h && Array.isArray(h.daily)){ detailDaily=h.daily; if(DETAIL.node) renderDetail(); } })
+      .catch(function(){ go(i+1); });
+  })(0);
+}
+function openDetail(key){
+  var node=NODES[key]; if(!node) return;
+  DETAIL.node=key;
+  if(resIsMulti(DETAIL.res) && !nodeHasMulti(node)) DETAIL.res='day';
+  $('dt_ic').textContent=node.ic; $('dt_title').textContent=node.title; $('dt_sub').textContent=node.sub;
+  $('detail').style.display='flex';
+  loadDaily();             // refresh the archive each open (cheap)
+  renderRes(); renderDetail();
+}
+function closeDetail(){ $('detail').style.display='none'; DETAIL.node=null; }
+function setRes(r){ DETAIL.res=r; renderRes(); renderDetail(); }
+function renderRes(){
+  var node=NODES[DETAIL.node]; if(!node) return;
+  $('dt_res').innerHTML=RESES.map(function(r){
+    var dis=resIsMulti(r[0]) && !nodeHasMulti(node);
+    var cls='resbtn'+(DETAIL.res===r[0]?' active':'')+(dis?' disabled':'');
+    return '<span class="'+cls+'"'+(dis?'':' onclick="setRes(\''+r[0]+'\')"')+'>'+r[1]+'</span>';
+  }).join('');
+}
+function fmtAxis(v,unit){
+  if(unit==='%') return Math.round(v)+'%';
+  if(unit==='W') return Math.abs(v)>=1000?((Math.round(v/100)/10)+'k'):String(Math.round(v));
+  return (Math.round(v*10)/10)+'';
+}
+function buildSeries(node,res){
+  if(res==='live'||res==='day'){
+    var now=Date.now(), win=(res==='live'?3600000:DAY), nb=(res==='live'?60:24), cut=now-win;
+    var bk=[]; for(var i=0;i<nb;i++) bk.push({sum:0,n:0,cur:0});
+    samples.forEach(function(s){ if(s.ts<cut) return;
+      var v=nodeSampleVal(node,s); if(v===null) return;
+      var bi=Math.min(nb-1,Math.max(0,Math.floor((s.ts-cut)/win*nb)));
+      var b=bk[bi]; b.sum+=v; b.n++; if(s.hw&&s.hw.curtailed) b.cur++;
+    });
+    var dt_h=(win/nb)/3600000, pts=[], cum=[], run=0;
+    bk.forEach(function(b){
+      var avg=b.n? b.sum/b.n : null;
+      pts.push({v:avg, cur:b.n?(b.cur/b.n>0.4):false, empty:!b.n});
+      if(node.kind==='power' && avg!==null) run+=Math.max(0,avg)*dt_h/1000;
+      else if(node.kind==='run' && avg!==null) run+=avg*dt_h;
+      cum.push(run);
+    });
+    var labs=detailTimeLabels(cut,win,res);
+    return {pts:pts, mode:(node.kind==='soc'?'line':'bars'), cum:((node.kind!=='soc'&&res==='day')?cum:null),
+            cumUnit:(node.kind==='run'?'h':'kWh'), unit:nodeKindUnit(node), signed:node.signed, labels:labs, multi:false, res:res};
+  }
+  var nd=(res==='week'?7:res==='month'?30:366), rows=detailDaily.slice(-nd), pts=[], cum=[], run=0;
+  rows.forEach(function(r){
+    var v=(node.kind==='soc')?(r.avg_soc==null?null:r.avg_soc):(node.daily?num(r[node.daily]):null);
+    pts.push({v:v, cur:(num(r.curt_h)||0)>0.05, empty:(v===null), label:r.d});
+    if(node.kind!=='soc' && v!==null) run+=v;
+    cum.push(run);
+  });
+  return {pts:pts, mode:(node.kind==='soc'?'line':'bars'), cum:(node.kind!=='soc'?cum:null),
+          cumUnit:(node.kind==='run'?'h':'kWh'), unit:(node.kind==='soc'?'%':(node.kind==='run'?'h':'kWh')),
+          signed:false, labels:rows.map(function(r){return r.d.slice(5);}), multi:true, res:res};
+}
+function detailTimeLabels(cut,win,res){
+  function f(ts){ var d=new Date(ts); return res==='live'?(d.getHours()+':'+('0'+d.getMinutes()).slice(-2)):(d.getHours()+':00'); }
+  return [f(cut), f(cut+win/2), f(cut+win)];
+}
+function leftAxisTitle(data,node){
+  if(data.mode==='line') return 'SOC ('+data.unit+')';
+  if(node.kind==='run')  return data.multi ? 'Hours / day' : 'On / Off';
+  return data.multi ? ('Energy ('+data.unit+'/day)') : ('Power ('+data.unit+')');
+}
+function drawDetailChart(data,node){
+  // Dual-axis chart: LEFT axis = primary series (bars rate, or SOC line); RIGHT axis =
+  // the cumulative running total (kWh / h). Each axis carries a colour-matched title +
+  // tick labels, and the cumulative line is tipped with its final value so it reads as a
+  // real number, not just a shape.
+  var svg=$('dt_chart');
+  var x0=34, x1=308, y0=22, y1=130, cb0=139, cb1=145, txtCurtY=cb1+7, lblY=cb1+13, yTitle=11, pw=x1-x0, ph=y1-y0, n=data.pts.length;
+  var vals=data.pts.filter(function(p){return p.v!==null;}).map(function(p){return p.v;});
+  if(!vals.length){ svg.innerHTML='<text x="175" y="84" text-anchor="middle" class="dc-axis" style="font-size:11px;fill:#5b6b86">No data captured for this range yet.</text>'; return; }
+  var vmax=Math.max.apply(null,vals), vmin=Math.min.apply(null,vals), lo, hi;
+  if(node.kind==='soc'){ lo=Math.max(0,Math.floor((vmin-3)/5)*5); hi=Math.min(100,Math.ceil((vmax+3)/5)*5); if(hi<=lo)hi=lo+5; }
+  else if(data.signed){ lo=Math.min(0,vmin); hi=Math.max(0,vmax); if(hi<=lo)hi=lo+1; }
+  else { lo=0; hi=vmax>0?vmax:1; }
+  function Y(v){ return y1-((v-lo)/(hi-lo))*ph; }
+  var P=[];
+  // cumulative (right-axis) scale — only drawn when there's a cumulative line
+  var cmax=null, fCum=(data.cumUnit==='h')?fmtHrs:fmtKwh;
+  if(data.cum) cmax=Math.max.apply(null,data.cum)||1;
+  // axis titles — colour = the series each axis describes (bars=gold / SOC-line=green / cumulative=cyan)
+  var Lcol=(data.mode==='bars')?'var(--gold)':seriesColor(node);
+  P.push('<text class="dc-atitle" x="'+x0+'" y="'+yTitle+'" fill="'+Lcol+'">▮ '+leftAxisTitle(data,node)+'</text>');
+  if(data.cum) P.push('<text class="dc-atitle" x="'+x1+'" y="'+yTitle+'" text-anchor="end" fill="#7fdcff">Cumulative ('+data.cumUnit+') ▬</text>');
+  // gridlines + DUAL tick labels: left = primary scale (W/%/h), right = cumulative scale (kWh/h)
+  for(var g=0;g<=2;g++){ var gv=lo+(hi-lo)*g/2, gy=Y(gv);
+    P.push('<line class="dc-grid" x1="'+x0+'" y1="'+gy.toFixed(1)+'" x2="'+x1+'" y2="'+gy.toFixed(1)+'"/>');
+    P.push('<text class="dc-ylab" x="'+(x0-4)+'" y="'+(gy-1.5).toFixed(1)+'" text-anchor="end">'+fmtAxis(gv,data.unit)+'</text>');
+    if(data.cum){ var cv=cmax*g/2; P.push('<text class="dc-ylab" x="'+(x1+4)+'" y="'+(gy-1.5).toFixed(1)+'">'+fCum(cv)+'</text>'); }
+  }
+  if(data.signed && lo<0){ var zy=Y(0); P.push('<line x1="'+x0+'" y1="'+zy.toFixed(1)+'" x2="'+x1+'" y2="'+zy.toFixed(1)+'" stroke="var(--mut)" stroke-width="0.7"/>'); }
+  if(data.mode==='bars'){
+    var bw=pw/n, gap=Math.min(2.2, bw*0.2);
+    data.pts.forEach(function(p,i){ if(p.v===null) return;
+      var bx=x0+i*bw+gap/2, bwid=Math.max(0.7,bw-gap), yv=Y(p.v), yz=Y(data.signed?0:lo);
+      var top=Math.min(yv,yz), hgt=Math.max(0.7,Math.abs(yz-yv));
+      P.push('<rect class="dc-bar'+((p.cur&&node.gen)?' cur':'')+'" x="'+bx.toFixed(1)+'" y="'+top.toFixed(1)+'" width="'+bwid.toFixed(1)+'" height="'+hgt.toFixed(1)+'" rx="0.8"/>'); });
+  } else {
+    var lp=[]; data.pts.forEach(function(p,i){ if(p.v===null) return; lp.push((x0+(i+0.5)*(pw/n)).toFixed(1)+','+Y(p.v).toFixed(1)); });
+    P.push('<polyline class="dc-cum" style="stroke:'+seriesColor(node)+';stroke-width:2" points="'+lp.join(' ')+'"/>');
+  }
+  if(data.cum){
+    var cp=[], lastX=0, lastY=0;
+    data.cum.forEach(function(c,i){ var cx=x0+(i+0.5)*(pw/n), cy=y1-(c/cmax)*ph; cp.push(cx.toFixed(1)+','+cy.toFixed(1)); lastX=cx; lastY=cy; });
+    P.push('<polyline class="dc-cum" points="'+cp.join(' ')+'"/>');
+    // final cumulative value at the tip of the line — so the curve carries an actual number
+    var cF=data.cum[data.cum.length-1], tipY=Math.max(y0+8, Math.min(y1-1, lastY-4));
+    P.push('<circle cx="'+lastX.toFixed(1)+'" cy="'+lastY.toFixed(1)+'" r="2.4" fill="#7fdcff"/>');
+    P.push('<text class="dc-tip" x="'+(lastX-4).toFixed(1)+'" y="'+tipY.toFixed(1)+'" text-anchor="end">'+fCum(cF)+' '+data.cumUnit+'</text>');
+  }
+  var anyCur=false;
+  data.pts.forEach(function(p,i){ if(p.cur){ anyCur=true; var bw=pw/n; P.push('<rect class="dc-curtband" x="'+(x0+i*bw).toFixed(1)+'" y="'+cb0+'" width="'+(bw+0.5).toFixed(1)+'" height="'+(cb1-cb0)+'"/>'); } });
+  P.push('<line class="dc-grid" x1="'+x0+'" y1="'+cb0+'" x2="'+x1+'" y2="'+cb0+'"/>');
+  P.push('<text class="dc-axis" x="'+x0+'" y="'+txtCurtY+'">'+(anyCur?'▮ curtailed':'no curtailment in range')+'</text>');
+  if(data.multi){
+    var stepL=Math.max(1,Math.ceil(n/5));
+    data.pts.forEach(function(p,i){ if(i%stepL===0){ P.push('<text class="dc-axis" x="'+(x0+(i+0.5)*(pw/n)).toFixed(1)+'" y="'+lblY+'" text-anchor="middle">'+(p.label?p.label.slice(5):'')+'</text>'); } });
+  } else {
+    P.push('<text class="dc-axis" x="'+x0+'" y="'+lblY+'">'+data.labels[0]+'</text>');
+    P.push('<text class="dc-axis" x="'+((x0+x1)/2).toFixed(0)+'" y="'+lblY+'" text-anchor="middle">'+data.labels[1]+'</text>');
+    P.push('<text class="dc-axis" x="'+x1+'" y="'+lblY+'" text-anchor="end">'+data.labels[2]+'</text>');
+  }
+  svg.innerHTML=P.join('');
+}
+function renderLegend(data,node){
+  var L=[];
+  if(data.mode==='bars'){
+    var what=data.multi?('daily total '+data.unit):(node.kind==='run'?'runtime on/off':'per-bucket avg '+data.unit);
+    L.push('<span class="lg"><span class="sw" style="background:var(--gold)"></span>bars · '+what+'</span>');
+  } else L.push('<span class="lg"><span class="sw" style="background:'+seriesColor(node)+'"></span>line · '+node.title+' '+data.unit+'</span>');
+  if(data.cum) L.push('<span class="lg"><span class="sw" style="background:#7fdcff"></span>line · cumulative '+data.cumUnit+' so far</span>');
+  L.push('<span class="lg"><span class="sw" style="background:var(--red)"></span>curtailed</span>');
+  $('dt_legend').innerHTML=L.join('');
+}
+function renderPC(node){
+  var pc=$('dt_pc');
+  if(!node.pc){ pc.style.display='none'; pc.innerHTML=''; return; }
+  var ch=(state.hw&&state.hw.chargers)||(relayChargers.data)||null;
+  var rows=[['MPPT-288','m288'],['MPPT-289','m289'],['RS Solar 1','rs1'],['RS Solar 2','rs2']];
+  var mx=ch?Math.max(1,num(ch.m288)||0,num(ch.m289)||0,num(ch.rs1)||0,num(ch.rs2)||0):1;
+  pc.style.display='grid';
+  pc.innerHTML='<div class="detail-sub" style="margin-bottom:1px">Per-charger now'+(ch?'':' — no live feed')+'</div>'+rows.map(function(r){
+    var v=ch?num(ch[r[1]]):null, p=(v!==null)?Math.max(0,Math.min(100,v/mx*100)):0;
+    return '<div class="detail-pcrow"><span class="ctk-k">'+r[0]+'</span><span class="ctk-bar"><i style="width:'+p.toFixed(0)+'%"></i></span><span class="ctk-v">'+(v===null?'—':W(v)+' W')+'</span></div>';
+  }).join('');
+}
+function renderTiles(node){
+  var d=detailDaily, tiles=[];
+  if(node.kind==='soc'){
+    var today=d.length?d[d.length-1]:null, week=d.slice(-7);
+    var socRows=week.filter(function(r){return r.avg_soc!=null;});
+    var avg=socRows.length?socRows.reduce(function(a,r){return a+r.avg_soc;},0)/socRows.length:null;
+    var mn=week.reduce(function(m,r){var v=num(r.min_soc);return v===null?m:(m===null?v:Math.min(m,v));},null);
+    tiles=[['Today avg', today&&today.avg_soc!=null?today.avg_soc+'%':'–'],
+           ['7-day avg', avg!=null?(Math.round(avg*10)/10)+'%':'–'],
+           ['7-day min', mn!=null?mn+'%':'–'],
+           ['Today min', today&&today.min_soc!=null?today.min_soc+'%':'–']];
+  } else {
+    var key=node.daily, u=(node.kind==='run'?'h':'kWh');
+    if(!key){ tiles=[['Today','live only'],['Range','Live / Day'],['Note','no daily archive'],['','']]; }
+    else {
+      var todayV=d.length?num(d[d.length-1][key]):null;
+      var last7=d.slice(-7), week=last7.reduce(function(a,r){return a+(num(r[key])||0);},0);
+      var navg=last7.filter(function(r){return num(r[key])!==null;}).length||1, avg=week/navg;
+      var lastWk=d.length>=8?num(d[d.length-8][key]):null;
+      var delta=(todayV!=null&&lastWk!=null&&lastWk>0)?Math.round((todayV-lastWk)/lastWk*100):null;
+      tiles=[['Today', todayV!=null?fmtKwh(todayV)+' '+u:'–'],
+             ['This week', fmtKwh(week)+' '+u],
+             ['7-day avg', fmtKwh(avg)+' '+u],
+             ['vs last wk', delta==null?'–':((delta>0?'+':'')+delta+'%'), delta]];
+    }
+  }
+  $('dt_tiles').innerHTML=tiles.map(function(t){
+    var hasD=(t.length>2&&t[2]!=null), vcls=hasD?(t[2]>=0?' up':' down'):'';
+    return '<div class="dtile'+(hasD?' delta':'')+'"><div class="k">'+t[0]+'</div><div class="v'+vcls+'">'+t[1]+'</div></div>';
+  }).join('');
+}
+function renderDetail(){
+  var node=NODES[DETAIL.node]; if(!node) return;
+  var data=buildSeries(node,DETAIL.res);
+  drawDetailChart(data,node); renderLegend(data,node); renderPC(node); renderTiles(node);
+  var note='';
+  if(resIsMulti(DETAIL.res)){
+    var nd=detailDaily.length;
+    note='Daily archive: '+nd+' day'+(nd===1?'':'s')+' captured — Week/Month/Year fill in as the relay runs.';
+    if(['dc_kwh','fron_kwh','sur_kwh','load_kwh'].indexOf(node.daily)>=0) note+=' (this metric’s daily energy began logging 2026-06-16.)';
+  } else if(node.pc){ note='Per-charger figures are live-only — per-tracker history capture is a follow-up.'; }
+  $('dt_note').textContent=note;
+}
+document.addEventListener('keydown', function(e){ if(e.key==='Escape' && DETAIL.node) closeDetail(); });
+
+/* ---- collapsible cards (localStorage-persisted) -----------------------------
+   The whole header row toggles its card. State per data-card is saved so the
+   user's layout sticks across reloads. Time Machine defaults collapsed
+   (data-collapsed="1") so the slider can't be scrubbed by accident. */
+var CKEY='bsf_dash_collapse_v1';
+function loadCollapse(){ try{ return JSON.parse(localStorage.getItem(CKEY)||'{}')||{}; }catch(e){ return {}; } }
+function saveCollapse(m){ try{ localStorage.setItem(CKEY,JSON.stringify(m)); }catch(e){} }
+function initCollapsibles(){
+  var cards=document.querySelectorAll('.collapsible'), saved=loadCollapse();
+  for(var i=0;i<cards.length;i++){
+    (function(card){
+      var key=card.getAttribute('data-card');
+      var def=card.getAttribute('data-collapsed')==='1';
+      var collapsed=(saved && Object.prototype.hasOwnProperty.call(saved,key)) ? !!saved[key] : def;
+      card.classList.toggle('collapsed',collapsed);
+      var hdr=card.querySelector('.cardhdr, .gatehead');
+      if(hdr) hdr.addEventListener('click',function(){
+        var nowCollapsed=!card.classList.contains('collapsed');
+        card.classList.toggle('collapsed',nowCollapsed);
+        var m=loadCollapse(); m[key]=nowCollapsed; saveCollapse(m);
+      });
+    })(cards[i]);
+  }
+}
+
+/* ---- history list ---- */
+function renderHistory(){
+  var c=$('hist'); var list=prune(events).slice().reverse();
+  if(!list.length){ c.innerHTML='<div class="empty">No transitions or anomalies captured yet. The dispatcher logs on state changes — quiet evenings show nothing, which is correct.</div>'; return; }
+  c.innerHTML=list.map(function(e){
+    var srcTag = e.src==='hw'?'<span class="tag hw">HW</span>':(e.src==='ac'?'<span class="tag ac">AC</span>':'');
+    var kindTag = e.kind==='on'?'<span class="tag on">ON</span>':(e.kind==='off'?'<span class="tag off">OFF</span>':(e.kind==='warn'?'<span class="tag warn">ANOMALY</span>':''));
+    var nm = esc(e.name)+(e.observed?' <span style="color:var(--dim)">(observed)</span>':'');
+    return '<div class="ev"><div class="et">'+fmtShort(e.ts)+'</div><div class="eb">'+srcTag+kindTag+
+      '<span style="font-weight:700">'+nm+'</span>'+(e.detail?'<div class="ed">'+esc(e.detail)+'</div>':'')+'</div></div>';
+  }).join('');
+}
+
+/* ---- connection + staleness UI ---- */
+function paintConn(){
+  var p=$('connPill'), t=$('connTxt');
+  if(!viewLive){   // time-machine scrub: top label shows the replayed timestamp, not "LIVE"
+    p.className='pill scrub'; t.textContent='⏱ '+fmtShort(viewTs);
+    var au0=$('updAge'); if(au0) au0.textContent='replaying '+fmtShort(viewTs);
+    return;
+  }
+  var s=state.conn;
+  var ageMs=Date.now()-Math.max(state.hwTs,state.acTs);
+  var label=s, klass=s;
+  if(s==='live' && state.hwTs && ageMs>30000){ label='stale '+Math.round(ageMs/1000)+'s'; klass='stale'; }
+  else if(s==='live'){ label='LIVE'; }
+  else if(s==='connecting'){ label='connecting'; }
+  else if(s==='closed'){ label='reconnecting…'; }
+  else if(s==='error'){ label='error'; }
+  p.className='pill '+klass; t.textContent=label;
+  var au=$('updAge');
+  if(state.hwTs||state.acTs){ au.textContent='updated '+(ageMs<2000?'just now':(Math.round(ageMs/1000)+'s ago')); }
+  else au.textContent=(s==='connecting'?'connecting to Cerbo broker…':'no data');
+}
+function paintStale(snap){
+  var b=$('staleBanner'); var chips=[]; var msgs=[];
+  var ageMs=Date.now()-Math.max(state.hwTs,state.acTs);
+  if(state.conn!=='live'){ msgs.push('Not connected to the Cerbo broker ('+state.conn+'). Showing last known values.'); }
+  else if(state.hwTs && ageMs>30000){ msgs.push('No fresh status for '+Math.round(ageMs/1000)+'s — values below are the last received.'); }
+  if(snap.hw && (snap.hw.stale||[]).length){ (snap.hw.stale).forEach(function(k){ chips.push(k); }); msgs.push('Dispatcher reports stale Cerbo feeds:'); }
+  if(msgs.length){
+    b.classList.add('show');
+    b.innerHTML='⚠️ '+msgs.join(' ')+(chips.length?('<div class="stalechips">'+chips.map(function(c){return '<span class="chip">'+esc(c)+'</span>';}).join('')+'</div>'):'');
+  } else b.classList.remove('show');
+}
+
+/* ---- time machine ---- */
+$('tmSlider').addEventListener('input', function(){
+  viewLive=false; $('liveBtn').classList.remove('active'); $('liveBtn').textContent='○ LIVE';
+  viewIdx=+this.value;
+  var s=samples[viewIdx];
+  if(s){ render({hw:s.hw, ac:s.ac, ts:s.ts, live:false});
+    $('tmTime').textContent=fmtShort(s.ts);
+    var dt=Date.now()-s.ts; $('tmState').textContent = dt<60000?'now':('T−'+Math.round(dt/60000)+' min');
+    viewTs=s.ts; paintConn();   // swap the top "LIVE" label to the scrubbed timestamp
+  }
+});
+$('liveBtn').addEventListener('click', goLive);
+function goLive(){ viewLive=true; $('liveBtn').classList.add('active'); $('liveBtn').textContent='● LIVE';
+  $('tmTime').textContent='live'; $('tmState').textContent=''; $('tmSlider').value=samples.length-1;
+  render(currentSnapshot()); paintConn(); }   // restore the top "LIVE" label
+
+/* ---- tickers ---- */
+setInterval(function(){ paintConn(); if(viewLive) paintStale(currentSnapshot()); }, 1000);
+// keep presence "min ago" / writable state fresh between MQTT messages (every 10s)
+setInterval(function(){ renderAcMode(state.ac); renderPresence(); }, 10000);
+setInterval(refreshRelayTemp, 15000);  // match the relay's 15s write cadence (keeps the MQTT-mode pv_dc/pv_fronius + temp backfill close to live)
+setTimeout(refreshRelayTemp, 7000);
+
+/* ---- init paint ---- */
+initCollapsibles();   // restore saved open/closed state (Time Machine defaults collapsed)
+renderWeekly();       // paint the "This week" tiles (placeholders until the relay lands)
+renderAcControl(state.ac);   // paint the AC heating-threshold control (disabled until first live data)
+renderAcMode(state.ac); renderPresence();   // v1.11 mode switch + presence list (disabled until first live data)
+loadDaily();          // Phase C: prime the per-day archive for the detail-card Week/Month/Year
+renderHistory();
+$('tmSlider').max=Math.max(0,samples.length-1);
+if(samples.length){ var last=samples[samples.length-1]; render({hw:last.hw||null, ac:last.ac||null, ts:last.ts, live:true}); $('tmSlider').value=samples.length-1; }
+updateSky(Date.now());                                                  // paint the sky immediately, even before farm data
+setInterval(function(){ if(viewLive) updateSky(Date.now()); }, 20000);  // keep the sky advancing while live
+paintConn();
+window.__bsf={ state:state, history:samples, reader:reader, updateSky:updateSky, render:render, currentSnapshot:currentSnapshot, SunCalc:window.SunCalc }; // for diagnostics
+</script>
+
+<!-- ============================================================================
+     BSF Solar Dispatch — donation gate  (DISPLAY ONLY — never touches dispatch)
+     The Node-RED dispatcher on the Cerbo (hot water, air-con, presence) keeps
+     running no matter what this overlay shows. This is a polite, honour-system
+     reminder after a free trial. No server, no account, no phone-home.
+       • First page-load stamps a start time in this browser's localStorage.
+       • After trialDays (default 30) it shows a full-screen "send a coffee" card.
+       • Entering any valid UUID licence key dismisses it forever (trust-based).
+       • ?test_paywall=true compresses each day into ONE SECOND (30 days -> 30 s)
+         so you can verify the lock without waiting a month.
+============================================================================ -->
+<style>
+  #bsf-paywall{position:fixed;inset:0;z-index:2147483600;display:none;
+    background:rgba(8,12,18,.975);-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);
+    color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    align-items:center;justify-content:center;padding:22px;box-sizing:border-box;}
+  #bsf-paywall.show{display:flex;}
+  #bsf-paywall .card{max-width:430px;width:100%;text-align:center;box-sizing:border-box;
+    background:#161b22;border:1px solid #2b333d;border-radius:18px;padding:30px 26px;
+    box-shadow:0 24px 70px rgba(0,0,0,.55);}
+  #bsf-paywall .emoji{font-size:36px;line-height:1;margin-bottom:8px;}
+  #bsf-paywall h2{margin:0 0 4px;font-size:21px;font-weight:700;color:#f3f4f6;letter-spacing:0;}
+  #bsf-paywall .sub{color:#9aa4b2;font-size:13.5px;margin:0 0 16px;}
+  #bsf-paywall p{font-size:15px;line-height:1.55;margin:0 0 12px;color:#e6e9ee;}
+  #bsf-paywall .amt{color:#f5b62e;font-weight:700;}
+  #bsf-paywall a.donate{display:block;background:#f5b62e;color:#1a1205;font-weight:700;
+    text-decoration:none;padding:13px;border-radius:11px;margin:18px 0 12px;font-size:16px;}
+  #bsf-paywall a.donate:active{transform:translateY(1px);}
+  #bsf-paywall .lic{display:flex;gap:8px;margin-top:4px;}
+  #bsf-paywall input{flex:1;min-width:0;padding:11px;border-radius:9px;border:1px solid #2b333d;
+    background:#0d1117;color:#f3f4f6;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;}
+  #bsf-paywall button.key{background:#2b333d;color:#f3f4f6;border:none;border-radius:9px;
+    padding:11px 15px;font-size:14px;cursor:pointer;white-space:nowrap;}
+  #bsf-paywall button.key:active{transform:translateY(1px);}
+  #bsf-paywall .err{color:#ef6b6b;font-size:12px;min-height:15px;margin-top:8px;}
+  #bsf-paywall .ok{color:#5fd38d;}
+  #bsf-paywall .foot{color:#6b7280;font-size:11px;margin-top:14px;line-height:1.4;}
+</style>
+<div id="bsf-paywall" role="dialog" aria-modal="true" aria-label="Support BSF Solar Dispatch">
+  <div class="card">
+    <div class="emoji">🙏</div>
+    <h2 id="bsf-pw-title">BSF Solar Dispatch — 30 days in</h2>
+    <p class="sub">From one farmer to another — thanks for running it.</p>
+    <p>If this is making your life easier, please send me a coffee.<br>
+       Minimum <span class="amt">$2</span> to continue. Pay what you want above.</p>
+    <a class="donate" id="bsf-donate" href="#" target="_blank" rel="noopener noreferrer">☕ Donate on Gumroad</a>
+    <div class="lic">
+      <input id="bsf-key" placeholder="Paste licence key (UUID)" autocomplete="off" spellcheck="false" autocapitalize="off">
+      <button class="key" id="bsf-key-btn" type="button">Unlock</button>
+    </div>
+    <div class="err" id="bsf-key-err"></div>
+    <div class="foot">Honour system · no account · no subscription · yours forever once you've chipped in.</div>
+  </div>
+</div>
+<script>
+(function(){
+  var CFG=window.BSF_CONFIG||{};
+  var GUMROAD_URL=CFG.gumroadUrl||"https://banksiaspringsfarm.gumroad.com/l/solar-dispatch";
+  var LS_FIRST="bsf_dispatch_first_run", LS_LIC="bsf_dispatch_license";
+  var q=new URLSearchParams(location.search);
+  var TEST=q.get("test_paywall")==="true";
+  var trialDays=(+CFG.trialDays)||30;
+  var trialMs=TEST ? trialDays*1000 : trialDays*24*3600*1000;   // test mode: 1 day -> 1 second
+  var UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  function lget(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+  function lset(k,v){try{localStorage.setItem(k,v);}catch(e){}}
+  function ldel(k){try{localStorage.removeItem(k);}catch(e){}}
+
+  // ?reset_trial=true -> wipe trial + licence on THIS device (re-test the trial flow)
+  if(q.get("reset_trial")==="true"){ ldel(LS_FIRST); ldel(LS_LIC);
+    if(history.replaceState){ history.replaceState(null,"",location.pathname); } }
+
+  if(lget(LS_LIC)) return;                       // already supported -> never gate again
+
+  var first=parseInt(lget(LS_FIRST),10);
+  if(!first||isNaN(first)){ first=Date.now(); lset(LS_FIRST,String(first)); }
+  // deploy.py --reset-trial bumps BSF_CONFIG.trialResetAt; restart the trial for any
+  // device whose first-run predates it (lets a fresh install re-arm the trial cleanly).
+  var resetAt=parseInt(CFG.trialResetAt,10);
+  if(resetAt && first < resetAt){ first=Date.now(); lset(LS_FIRST,String(first)); }
+
+  var el=document.getElementById("bsf-paywall");
+  document.getElementById("bsf-donate").href=GUMROAD_URL;
+  document.getElementById("bsf-pw-title").textContent="BSF Solar Dispatch — "+trialDays+" days in";
+
+  function check(){
+    if(lget(LS_LIC)){ el.classList.remove("show"); return; }
+    if(Date.now()-first >= trialMs){ el.classList.add("show"); }
+  }
+  document.getElementById("bsf-key-btn").addEventListener("click",function(){
+    var v=(document.getElementById("bsf-key").value||"").trim();
+    var err=document.getElementById("bsf-key-err");
+    if(UUID.test(v)){ lset(LS_LIC,v); err.className="err ok"; err.textContent="Thank you. Unlocked."; el.classList.remove("show"); }
+    else { err.className="err"; err.textContent="That doesn't look like a valid key (expected a UUID)."; }
+  });
+  check();
+  if(TEST) setInterval(check,1000);              // poll so the lock appears live during a test countdown
+})();
+</script>
+</body>
+</html>

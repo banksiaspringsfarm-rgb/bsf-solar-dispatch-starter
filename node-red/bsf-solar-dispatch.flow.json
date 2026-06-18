@@ -1,0 +1,3142 @@
+[
+  {
+    "id": "7e4c2df6882dbb5d",
+    "type": "tab",
+    "label": "SOC Load Shedding"
+  },
+  {
+    "id": "hwv3.tab",
+    "type": "tab",
+    "label": "Hot Water v3+ (dispatch)",
+    "disabled": false,
+    "info": "Hot Water v3+ surplus-PV dispatcher.\nPhase 1: plug command UNWIRED \u2014 dispatcher publishes status/log only.\nPhase 2 (manual): wire dispatcher out[0] and lockout out[0] to the existing tuya-smart-device 'Hot Water' node in the 'SOC Load Shedding' tab, then disable the v2 hw-fn wire."
+  },
+  {
+    "id": "bridges.tab",
+    "type": "tab",
+    "label": "Tuya Telemetry Bridges",
+    "disabled": false,
+    "info": "Bridges Tuya plug DPS values to MQTT topics. Subscribed by HW v3+ dispatcher (plug_state/power) and AC v1 dispatcher (state/power/temps). Adding/changing nodes here doesn't affect the dispatch tabs directly \u2014 they read via MQTT."
+  },
+  {
+    "id": "data.tab",
+    "type": "tab",
+    "label": "Data Persistence",
+    "disabled": false,
+    "info": "JSONL event log + state snapshots on /data/bsf/. HTTP endpoints at /api/bsf/* reachable via Victron cloud relay. Schema at ~/Documents/wikis/bsf/data/SCHEMA.md."
+  },
+  {
+    "id": "acv15.tab",
+    "type": "tab",
+    "label": "AC v1.5 (morning warm-up)",
+    "disabled": false,
+    "info": "AC v1.5 \u2014 single-window MORNING dispatcher (04:30-08:00). SOC \u2265 75 % \u2192 AC ON, sustained 60 s. Outside MORNING \u2192 5-min force-OFF loop. Skips temps (Tuya plug telemetry not flowing). Plug command wired to bridge.tuya.ac in the Tuya Telemetry Bridges tab."
+  },
+  {
+    "id": "victron-client-id",
+    "type": "victron-client",
+    "showValues": true,
+    "contextStore": true,
+    "enablePolling": false
+  },
+  {
+    "id": "hwv3.broker",
+    "type": "mqtt-broker",
+    "name": "Cerbo local broker",
+    "broker": "__CERBO_IP__",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "sessionExpiry": ""
+  },
+  {
+    "id": "soc-input",
+    "type": "victron-input-system",
+    "z": "7e4c2df6882dbb5d",
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Soc",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system",
+      "communityTag": "system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Soc",
+      "type": "float",
+      "name": "Battery State of Charge (%)"
+    },
+    "name": "Battery SOC",
+    "onlyChanges": false,
+    "roundValues": "1",
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 100,
+    "y": 100,
+    "wires": [
+      [
+        "hw-fn"
+      ]
+    ]
+  },
+  {
+    "id": "hw-fn",
+    "type": "function",
+    "z": "7e4c2df6882dbb5d",
+    "name": "Hot Water (solar window + 90/95%)",
+    "func": "var lat = __LAT__;\nvar lon = __LON__;\nvar utcOffset = 10;\n\nvar now = new Date();\nvar dayOfYear = Math.floor((now - new Date(now.getFullYear(),0,0)) / 86400000);\n\nvar decl = -23.45 * Math.cos(2 * Math.PI * (dayOfYear + 10) / 365);\nvar declRad = decl * Math.PI / 180;\nvar latRad = lat * Math.PI / 180;\nvar cosHA = -Math.tan(latRad) * Math.tan(declRad);\ncosHA = Math.max(-1, Math.min(1, cosHA));\nvar haDeg = Math.acos(cosHA) * 180 / Math.PI;\nvar solarNoon = 12 - lon / 15 + utcOffset;\nvar sunriseHour = solarNoon - haDeg / 15;\nvar sunsetHour  = solarNoon + haDeg / 15;\n\nvar windowOpen  = sunriseHour + 2;\nvar windowClose = sunsetHour  - 2;\n\nvar currentHour = now.getHours() + now.getMinutes() / 60;\nvar inWindow = (currentHour >= windowOpen && currentHour < windowClose);\n\nvar isTimeCheck = (msg.topic === \"time_check\");\nvar soc;\n\nif (isTimeCheck) {\n    soc = flow.get(\"lastSoc\") || 0;\n} else {\n    soc = msg.payload;\n    if (typeof soc !== \"number\") { return null; }\n    flow.set(\"lastSoc\", soc);\n}\n\nvar hwState = flow.get(\"hwState\") || \"off\";\nvar newState = hwState;\n\nif (soc <= 90) {\n    newState = \"off\";\n} else if (!inWindow) {\n    newState = \"off\";\n} else if (soc >= 95 && inWindow) {\n    newState = \"on\";\n}\n\n// Belt-and-braces safeguard: on every 5-min time check, if outside window,\n// send an unconditional OFF command regardless of remembered hwState.\nif (isTimeCheck && !inWindow) {\n    flow.set(\"hwState\", \"off\");\n    var safeCmd  = { payload: { dps: 1, set: false } };\n    var safeLog  = {\n        payload: \"[\" + now.toLocaleTimeString(\"en-AU\") + \"] Hot Water OFF (safeguard: outside window)\" +\n                 \" | Window: \" + windowOpen.toFixed(1) + \"-\" + windowClose.toFixed(1)\n    };\n    return [safeCmd, safeLog];\n}\n\nif (newState !== hwState) {\n    flow.set(\"hwState\", newState);\n    var cmd = { payload: { dps: 1, set: (newState === \"on\") } };\n    var reason = isTimeCheck ? \"window close\" : \"SOC=\" + soc + \"%\";\n    var logMsg = {\n        payload: \"[\" + now.toLocaleTimeString(\"en-AU\") + \"] Hot Water \" +\n                 newState.toUpperCase() + \" (\" + reason + \")\" +\n                 \" | Window: \" + windowOpen.toFixed(1) + \"-\" + windowClose.toFixed(1)\n    };\n    return [cmd, logMsg];\n}\n\nreturn [null, null];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 340,
+    "y": 100,
+    "wires": [
+      [],
+      [
+        "loadshed-debug"
+      ]
+    ],
+    "info": "var lat = __LAT__;\nvar lon = __LON__;\nvar utcOffset = 10;\n\nvar now = new Date();\nvar dayOfYear = Math.floor((now - new Date(now.getFullYear(),0,0)) / 86400000);\n\nvar decl = -23.45 * Math.cos(2 * Math.PI * (dayOfYear + 10) / 365);\nvar declRad = decl * Math.PI / 180;\nvar latRad = lat * Math.PI / 180;\nvar cosHA = -Math.tan(latRad) * Math.tan(declRad);\ncosHA = Math.max(-1, Math.min(1, cosHA));\nvar haDeg = Math.acos(cosHA) * 180 / Math.PI;\nvar solarNoon = 12 - lon / 15 + utcOffset;\nvar sunriseHour = solarNoon - haDeg / 15;\nvar sunsetHour  = solarNoon + haDeg / 15;\n\nvar windowOpen  = sunriseHour + 2;\nvar windowClose = sunsetHour  - 2;\n\nvar currentHour = now.getHours() + now.getMinutes() / 60;\nvar inWindow = (currentHour >= windowOpen && currentHour < windowClose);\n\nvar isTimeCheck = (msg.topic === \"time_check\");\nvar soc;\n\nif (isTimeCheck) {\n    soc = flow.get(\"lastSoc\") || 0;\n} else {\n    soc = msg.payload;\n    if (typeof soc !== \"number\") { return null; }\n    flow.set(\"lastSoc\", soc);\n}\n\nvar hwState = flow.get(\"hwState\") || \"off\";\nvar newState = hwState;\n\nif (soc <= 90) {\n    newState = \"off\";\n} else if (!inWindow && hwState === \"on\") {\n    newState = \"off\";\n} else if (soc >= 95 && inWindow) {\n    newState = \"on\";\n}\n\nif (newState !== hwState) {\n    flow.set(\"hwState\", newState);\n    var cmd = { payload: { dps: 1, set: (newState === \"on\") } };\n    var reason = isTimeCheck ? \"window close\" : \"SOC=\" + soc + \"%\";\n    var logMsg = {\n        payload: \"[\" + now.toLocaleTimeString(\"en-AU\") + \"] Hot Water \" +\n                 newState.toUpperCase() + \" (\" + reason + \")\" +\n                 \" | Window: \" + windowOpen.toFixed(1) + \"-\" + windowClose.toFixed(1)\n    };\n    return [cmd, logMsg];\n}\n\nreturn [null, null];"
+  },
+  {
+    "id": "hot-water-tuya",
+    "type": "tuya-smart-device",
+    "z": "7e4c2df6882dbb5d",
+    "deviceName": "",
+    "disableAutoStart": false,
+    "deviceId": "",
+    "deviceKey": "__TUYA_LOCAL_KEY_HW__",
+    "storeAsCreds": false,
+    "deviceIp": "__TUYA_LOCAL_IP_HW__",
+    "retryTimeout": "1000",
+    "findTimeout": "1000",
+    "tuyaVersion": "3.1",
+    "eventMode": "event-both",
+    "logLevel": "log-level-debug",
+    "x": 630,
+    "y": 100,
+    "wires": [
+      [],
+      []
+    ]
+  },
+  {
+    "id": "pump-on-inject",
+    "type": "inject",
+    "z": "7e4c2df6882dbb5d",
+    "name": "3:00pm daily",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "0 15 * * *",
+    "once": false,
+    "onceDelay": 0,
+    "payload": "true",
+    "payloadType": "bool",
+    "x": 100,
+    "y": 220,
+    "wires": [
+      [
+        "pump-on-change"
+      ]
+    ]
+  },
+  {
+    "id": "pump-on-change",
+    "type": "change",
+    "z": "7e4c2df6882dbb5d",
+    "name": "ON cmd",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"dps\":\"1\",\"set\":true}",
+        "tot": "json"
+      }
+    ],
+    "x": 280,
+    "y": 220,
+    "wires": [
+      [
+        "well-pump-tuya",
+        "loadshed-debug"
+      ]
+    ]
+  },
+  {
+    "id": "pump-off-inject",
+    "type": "inject",
+    "z": "7e4c2df6882dbb5d",
+    "name": "3:10pm daily",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "10 15 * * *",
+    "once": false,
+    "onceDelay": 0,
+    "payload": "true",
+    "payloadType": "bool",
+    "x": 100,
+    "y": 280,
+    "wires": [
+      [
+        "pump-off-change"
+      ]
+    ]
+  },
+  {
+    "id": "pump-off-change",
+    "type": "change",
+    "z": "7e4c2df6882dbb5d",
+    "name": "OFF cmd",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"dps\":\"1\",\"set\":false}",
+        "tot": "json"
+      }
+    ],
+    "x": 280,
+    "y": 280,
+    "wires": [
+      [
+        "well-pump-tuya",
+        "loadshed-debug"
+      ]
+    ]
+  },
+  {
+    "id": "well-pump-tuya",
+    "type": "tuya-smart-device",
+    "z": "7e4c2df6882dbb5d",
+    "deviceName": "",
+    "disableAutoStart": false,
+    "deviceId": "",
+    "deviceKey": "__TUYA_LOCAL_KEY_WELLPUMP__",
+    "storeAsCreds": false,
+    "deviceIp": "__TUYA_LOCAL_IP_WELLPUMP__",
+    "retryTimeout": "1000",
+    "findTimeout": "1000",
+    "tuyaVersion": "3.1",
+    "eventMode": "event-both",
+    "logLevel": "log-level-debug",
+    "x": 500,
+    "y": 250,
+    "wires": [
+      [],
+      []
+    ]
+  },
+  {
+    "id": "loadshed-debug",
+    "type": "debug",
+    "z": "7e4c2df6882dbb5d",
+    "name": "Load Shed Events",
+    "active": true,
+    "tosidebar": true,
+    "console": true,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 580,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "9a2d392f80cd2da6",
+    "type": "inject",
+    "z": "7e4c2df6882dbb5d",
+    "name": "5min time check",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "300",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "time_check",
+    "payload": "",
+    "payloadType": "date",
+    "x": 440,
+    "y": 420,
+    "wires": [
+      [
+        "hw-fn"
+      ]
+    ]
+  },
+  {
+    "id": "b3ca21a4de4a338b",
+    "type": "link in",
+    "z": "7e4c2df6882dbb5d",
+    "name": "soc.link.hwPlugCmd",
+    "links": [
+      "2e16c9d59bfa60f3"
+    ],
+    "x": 400,
+    "y": 100,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "8309d2935a2e2894",
+    "type": "link in",
+    "z": "7e4c2df6882dbb5d",
+    "name": "hw_plug_cmd",
+    "links": [
+      "2e16c9d59bfa60f3"
+    ],
+    "x": 425,
+    "y": 40,
+    "wires": [
+      [
+        "hot-water-tuya"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.comment",
+    "type": "comment",
+    "z": "hwv3.tab",
+    "name": "v3+ Phase 1 \u2014 PLUG COMMAND UNWIRED",
+    "info": "This tab is Phase 1 of the v3+ rollout.\n\nThe dispatcher's plug-command output (out[0]) and the lockout-loop's plug-command output (out[0]) are intentionally left disconnected.\n\nThat means: deploying this tab WILL NOT toggle the hot-water plug. The existing 'SOC Load Shedding' tab keeps doing that.\n\nWhat to verify before Phase 2:\n  1. Subscribe to bsf/hotwater/status \u2014 should publish every 30 s with realistic numbers (surplus, SOC, AC load, mode).\n  2. bsf/hotwater/log should show a 'sunrise_cron' entry after the daily 02:00 inject fires (or trigger it manually once to seed flow.sunrise/flow.sunset).\n  3. No noisy error spam in the debug pane.\n\nPhase 2 (do by hand):\n  \u2022 Wire dispatcher out[0] \u2192 existing tuya-smart-device 'Hot Water' node.\n  \u2022 Wire lockout out[0] \u2192 same tuya node.\n  \u2022 In 'SOC Load Shedding' tab: delete the wire from hw-fn out[1] to hot-water-tuya. Keep hw-fn itself (one-click rollback).\n  \u2022 Deploy.",
+    "x": 240,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "hwv3.inject.30s",
+    "type": "inject",
+    "z": "hwv3.tab",
+    "name": "10s tick",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "10",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "tick",
+    "payload": "",
+    "payloadType": "date",
+    "x": 100,
+    "y": 420,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.inject.daily",
+    "type": "inject",
+    "z": "hwv3.tab",
+    "name": "23:00 daily summary",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "00 23 * * *",
+    "once": false,
+    "onceDelay": 0,
+    "topic": "daily_summary",
+    "payload": "",
+    "payloadType": "date",
+    "x": 240,
+    "y": 540,
+    "wires": [
+      [
+        "hwv3.fn.dispatcher"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.inject.sunrise",
+    "type": "inject",
+    "z": "hwv3.tab",
+    "name": "02:00 sunrise/sunset",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "00 02 * * *",
+    "once": true,
+    "onceDelay": "30",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 620,
+    "y": 760,
+    "wires": [
+      [
+        "hwv3.fn.sunrise"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.inject.lockout",
+    "type": "inject",
+    "z": "hwv3.tab",
+    "name": "5 min lockout tick",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "*/5 * * * *",
+    "once": true,
+    "onceDelay": "60",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 610,
+    "y": 900,
+    "wires": [
+      [
+        "hwv3.fn.lockout"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.fn.agg",
+    "type": "function",
+    "z": "hwv3.tab",
+    "name": "agg (state aggregator)",
+    "func": "const STALE_MS = 5 * 60 * 1000;\nconst SOURCES = ['pv_dc','pv_fronius','ac_load','soc','batt_power','plug_state','plug_power',\n  'mppt288_state','mppt288_power','mppt289_state','mppt289_power',\n  'mppt_x288_state','mppt_x288_power','mppt_x289_state','mppt_x289_power',\n  'mode_288','mode_289','mode_rs1','mode_rs2'];\n\nfunction num(x) {\n  if (typeof x === 'number' && isFinite(x)) return x;\n  if (x && typeof x.value === 'number' && isFinite(x.value)) return x.value;\n  var n = parseFloat(x);\n  return isFinite(n) ? n : null;\n}\n\nvar t = msg.topic;\nif (SOURCES.indexOf(t) !== -1) {\n  var cache = flow.get('agg_cache') || {};\n  var entry = { ts: Date.now() };\n  if (t === 'plug_state') {\n    var p = msg.payload;\n    if (p && typeof p === 'object' && p.dps && (p.dps['1'] !== undefined)) entry.value = !!p.dps['1'];\n    else entry.value = (p === true || p === 'true' || p === 1);\n  } else if (t === 'plug_power') {\n    var p2 = msg.payload;\n    if (p2 && typeof p2 === 'object' && p2.dps && p2.dps['19'] !== undefined) entry.value = Number(p2.dps['19']) / 10;\n    else { var v = num(p2); if (v === null) return null; entry.value = v; }\n  } else {\n    var v2 = num(msg.payload);\n    if (v2 === null) return null;\n    entry.value = v2;\n  }\n  cache[t] = entry;\n  flow.set('agg_cache', cache);\n  return null;\n}\n\nif (t === 'tick') {\n  var cache2 = flow.get('agg_cache') || {};\n  var now = Date.now();\n  var stale = {};\n  // Defaults for downstream \u2014 INCLUDING 'present' flags for the MPPT subs\n  var state = {\n    pv_dc: 0, pv_fronius: null, ac_load: 0, soc: -1, batt_power: 0,\n    plug_state: false, plug_power: 0,\n    // null defaults so dispatcher can detect 'no data yet'\n    mppt288_power: null, mppt288_state: null,\n    mppt289_power: null, mppt289_state: null,\n    mppt_x288_power: null, mppt_x288_state: null,\n    mppt_x289_power: null, mppt_x289_state: null,\n    mode_288: null, mode_289: null, mode_rs1: null, mode_rs2: null,\n    ts: now, stale: stale\n  };\n  SOURCES.forEach(function(k){\n    var e = cache2[k];\n    if (!e || (now - e.ts) > STALE_MS) { stale[k] = true; }\n    if (e && e.value !== undefined && e.value !== null) state[k] = e.value;\n  });\n  return { topic: 'state', payload: state };\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 240,
+    "wires": [
+      [
+        "hwv3.fn.dispatcher"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.fn.dispatcher",
+    "type": "function",
+    "z": "hwv3.tab",
+    "name": "dispatcher",
+    "func": "// HOT WATER v3+ \u2014 SIMPLIFIED + HEURISTIC + MPPT-AWARE CURTAILMENT\n// 2026-06-02 PM revisions:\n//   - removed cylinder_done, post-OFF cooldown, plug-telemetry stale gates\n//   - heuristic curtailment override (SOC\u226585 AND batt_power \u2208 [0,500])\n//   - MPPT-aware curtailment: BlueSolar 258 or 259 yield < 200W AND SOC \u2265 80\n//   - When mpptCurtailed: SURPLUS_OFF threshold lowered 1200\u2192300, sustain 60\u2192180s\n//     (give the BlueSolars time to ramp up when HW element fires)\n\nconst SURPLUS_ON_W           = __DISP_SURPLUS_ON_W__;\nconst SURPLUS_OFF_W          = __DISP_SURPLUS_OFF_W__;\nconst SURPLUS_OFF_W_CURT     = __DISP_SURPLUS_OFF_W_CURT__;        // lowered while MPPT-curtailed\nconst SUSTAIN_OFF_MS         = __DISP_SUSTAIN_OFF_MS__;\nconst SUSTAIN_OFF_MS_CURT    = __DISP_SUSTAIN_OFF_MS_CURT__;     // extended while MPPT-curtailed\nconst ELEMENT_W              = __DISP_ELEMENT_W__;\nconst AC_CAP_W               = __DISP_LOAD_CAP_W__;\nconst AC_SAFETY_W            = __DISP_SAFETY_CAP_W__;\nvar SOC_ON_PCT             = __DISP_W1_SOC_ON__;\nvar SOC_OFF_PCT            = __DISP_W1_SOC_OFF__;\nconst SUSTAIN_ON_MS          = __DISP_SUSTAIN_ON_MS__;\nconst STALE_TOPIC_FAIL_OPEN  = true;\n// Heuristic curtailment (battery-near-full)\nconst CURTAIL_SOC_PCT        = 85;\nconst CURTAIL_BATT_LOW_W     = 0;\nconst CURTAIL_BATT_HIGH_W    = 1500;\nconst CURTAIL_FRONIUS_W      = __DISP_CURTAIL_FRONIUS_W__;    // v3.1 2026-06-04 Steven: Fronius < this W = freq-shift throttled\n// MPPT-aware curtailment (BlueSolars idle while Multi RS meets demand)\nconst MPPT_IDLE_W            = 200;        // per-BlueSolar yield below this = idle/throttled\nconst MPPT_CURT_SOC_PCT      = 80;\nconst MPPT_CURT_MIN_OTHER_W  = 1000;      // RS+Fronius must produce >= this while BlueSolars idle = real curtailment (else just no sun)\n\nfunction now() { return Date.now(); }\nfunction iso() { return new Date().toISOString(); }\nfunction num(x, d) { return (typeof x === 'number' && isFinite(x)) ? x : (d === undefined ? 0 : d); }\nfunction emit(out, m) { var a=[null,null,null,null,null]; a[out]=m; return a; }\nfunction emitMany(map) { var a=[null,null,null,null,null]; Object.keys(map).forEach(function(k){ a[+k]=map[k]; }); return a; }\nfunction logPayload(eventName, extra) { return { topic:'bsf/hotwater/log', payload: Object.assign({ ts:iso(), event:eventName }, extra||{}) }; }\nfunction statusPayload(extra) { return { topic:'bsf/hotwater/status', payload: Object.assign({ ts:iso() }, extra||{}) }; }\nfunction anomalyPayload(reason, extra) { return { topic:'bsf/hotwater/anomaly', payload: Object.assign({ ts:iso(), reason:reason, source:'dispatcher' }, extra||{}) }; }\nfunction plugCmd(on) { return { payload: { dps:'1', set:!!on } }; }\n\nif (msg.topic === 'daily_summary') {\n  var c = context.get('counters') || {};\n  var openStarted = context.get('onStartedAt') || 0;\n  if (openStarted) { c.on_minutes = num(c.on_minutes,0) + (Date.now()-openStarted)/60000; context.set('onStartedAt', Date.now()); }\n  var onMin = num(c.on_minutes, 0);\n  var lockoutAnomaliesToday = flow.get('lockout_anomalies') || 0;\n  var summary = { topic:'bsf/hotwater/daily', payload: {\n    ts:iso(), date_local:new Date().toLocaleDateString('en-AU'),\n    on_minutes:+(onMin.toFixed(1)), on_kwh:+((onMin/60*(ELEMENT_W/1000)).toFixed(3)),\n    on_transitions:num(c.on_transitions,0), off_transitions:num(c.off_transitions,0),\n    curtailment_on_hits:num(c.curtailment_on_hits,0), mppt_curtailment_holds:num(c.mppt_curtailment_holds,0),\n    safety_trips:num(c.safety_trips,0), lockout_anomalies:lockoutAnomaliesToday,\n    last_on:c.last_on||null, last_off:c.last_off||null\n  } };\n  context.set('counters', {}); flow.set('lockout_anomalies', 0);\n  return emit(4, summary);\n}\n\nif (msg.topic !== 'state') return null;\n\nvar s = msg.payload || {};\nvar t = now();\n\nvar sunriseISO = flow.get('sunrise');\nvar sunsetISO  = flow.get('sunset');\nvar sunrise = sunriseISO ? Date.parse(sunriseISO) : null;\nvar sunset  = sunsetISO  ? Date.parse(sunsetISO)  : null;\nif (!sunrise || !sunset || isNaN(sunrise) || isNaN(sunset)) {\n  var d = new Date();\n  sunrise = new Date(d.getFullYear(),d.getMonth(),d.getDate(),6,0,0).getTime();\n  sunset  = new Date(d.getFullYear(),d.getMonth(),d.getDate(),18,0,0).getTime();\n  node.warn('dispatcher: no sunrise/sunset, fallback 06-18');\n}\nvar DISPATCH_END_OFFSET_MS = 2 * 60 * 60 * 1000;\nvar mode = (t >= sunrise && t < (sunset - DISPATCH_END_OFFSET_MS)) ? 'DISPATCH' : 'LOCKOUT';\nflow.set('mode', mode);\nvar _hwHourFrac = new Date(t).getHours() + new Date(t).getMinutes()/60;\nvar hwWindow = 'W1';\nif (_hwHourFrac >= 8.0 && _hwHourFrac < 13.0) {\n    SOC_ON_PCT = __DISP_W2_SOC_ON__; SOC_OFF_PCT = __DISP_W2_SOC_OFF__; hwWindow = 'W2';\n} else if (_hwHourFrac >= 13.0 && t < (sunset - DISPATCH_END_OFFSET_MS)) {\n    SOC_ON_PCT = __DISP_W3_SOC_ON__; SOC_OFF_PCT = __DISP_W3_SOC_OFF__; hwWindow = 'W3';\n}\nflow.set('hw_window', hwWindow);\nvar hwState         = context.get('hwState')         || 'off';\nvar surplusOnSince  = context.get('surplusOnSince')  || null;\nvar surplusOffSince = context.get('surplusOffSince') || null;\nvar counters        = context.get('counters')        || {};\n\n// Stale check \u2014 Cerbo telemetry only\nvar stale = s.stale || {};\nvar anyStale = false; var staleList = [];\n['pv_dc','pv_fronius','ac_load','soc'].forEach(function(k){ if (stale[k]) { anyStale=true; staleList.push(k); } });\n\nvar pv_total   = num(s.pv_dc) + num(s.pv_fronius);\nvar ac_load    = num(s.ac_load);\nvar soc        = num(s.soc, -1);\nvar batt_power = num(s.batt_power);\nvar plug_state = !!s.plug_state;\nvar plug_power = num(s.plug_power);\nvar ac_other   = plug_state ? Math.max(0, ac_load - plug_power) : ac_load;\nvar surplus_now      = pv_total - ac_other;\nvar surplus_after_on = surplus_now - ELEMENT_W;\nvar ac_after_on      = ac_other + ELEMENT_W;\n// Resolve which MPPT instance pair has data (258/259 OR 288/289)\nvar mA = (typeof s.mppt288_power === 'number') ? s.mppt288_power : ((typeof s.mppt_x288_power === 'number') ? s.mppt_x288_power : null);\nvar mB = (typeof s.mppt289_power === 'number') ? s.mppt289_power : ((typeof s.mppt_x289_power === 'number') ? s.mppt_x289_power : null);\nvar mAState = s.mppt288_state || s.mppt_x288_state || null;\nvar mBState = s.mppt289_state || s.mppt_x289_state || null;\nvar mppt288_power = mA;\nvar mppt289_power = mB;\nvar mppt288_state = mAState;\nvar mppt289_state = mBState;\n// mppt_curtailed requires ACTUAL data (numeric); both null = no subscribers firing = don't trust\nvar mpptDataValid = (typeof mA === 'number') && (typeof mB === 'number');\nvar anyMpptIdle = mpptDataValid && ((mA < MPPT_IDLE_W) || (mB < MPPT_IDLE_W));\nvar mppt_other_pv = pv_total - num(mA) - num(mB);   // RS + Fronius (pv_dc already includes the BlueSolars)\nvar mppt_curtailed = anyMpptIdle && (soc >= MPPT_CURT_SOC_PCT) && (mppt_other_pv >= MPPT_CURT_MIN_OTHER_W);\nvar curtailed_heuristic = (soc >= CURTAIL_SOC_PCT) && (batt_power >= CURTAIL_BATT_LOW_W) && (batt_power < CURTAIL_BATT_HIGH_W);\nvar fronius_curtailed = (soc >= CURTAIL_SOC_PCT) && (batt_power >= CURTAIL_BATT_LOW_W) && Number.isFinite(s.pv_fronius) && (s.pv_fronius < CURTAIL_FRONIUS_W);\n// \u2191 legacy heuristics RETAINED FOR OBSERVABILITY/COMPARISON ONLY \u2014 they NO LONGER drive `curtailed` (2026-06-16, Steven).\n// CANONICAL CURTAILMENT: Victron hardware MppOperationMode throttle state, OR'd across all 4 DC PV trackers.\n//   0=Off, 1=Voltage/current limited (THROTTLED = real curtailment), 2=MPPT active, 255=N/A.\nvar mode_288 = (typeof s.mode_288 === 'number') ? s.mode_288 : null;\nvar mode_289 = (typeof s.mode_289 === 'number') ? s.mode_289 : null;\nvar mode_rs1 = (typeof s.mode_rs1 === 'number') ? s.mode_rs1 : null;\nvar mode_rs2 = (typeof s.mode_rs2 === 'number') ? s.mode_rs2 : null;\nvar curtailed = (mode_288 === 1) || (mode_289 === 1) || (mode_rs1 === 1) || (mode_rs2 === 1);\n\n// When curtailed, use relaxed OFF threshold + extended sustain\nvar off_thresh = curtailed ? SURPLUS_OFF_W_CURT : SURPLUS_OFF_W;\nvar off_sust   = curtailed ? SUSTAIN_OFF_MS_CURT : SUSTAIN_OFF_MS;\n\nvar statusMsg = statusPayload({\n  mode:mode, hwState:hwState, soc:soc,\n  pv_total:pv_total, ac_load:ac_load, ac_other:ac_other, plug_power:plug_power,\n  batt_power:batt_power,\n  surplus_now:Math.round(surplus_now), surplus_after_on:Math.round(surplus_after_on),\n  ac_after_on:Math.round(ac_after_on),\n  curtailed:curtailed, curtailed_heuristic:curtailed_heuristic, fronius_curtailed:fronius_curtailed, mppt_curtailed:mppt_curtailed, mppt_other_pv:Math.round(mppt_other_pv),\n  mode_288:mode_288, mode_289:mode_289, mode_rs1:mode_rs1, mode_rs2:mode_rs2,\n  mppt288_state:mppt288_state, mppt288_power:Math.round(mppt288_power),\n  mppt289_state:mppt289_state, mppt289_power:Math.round(mppt289_power),\n  off_thresh_active:off_thresh, off_sustain_active:off_sust,\n  sunrise_iso:sunriseISO, sunset_iso:sunsetISO, stale:staleList\n});\n\nfunction accrueOnMinutes() {\n  var started = context.get('onStartedAt') || 0;\n  if (started) counters.on_minutes = num(counters.on_minutes,0) + (t-started)/60000;\n  context.set('onStartedAt', 0);\n}\nfunction tripOff(eventName, reason, classTag) {\n  accrueOnMinutes();\n  counters.off_transitions = num(counters.off_transitions,0)+1;\n  if (classTag === 'safety') counters.safety_trips = num(counters.safety_trips,0)+1;\n  counters.last_off = iso();\n  context.set('counters', counters);\n  context.set('hwState', 'off');\n  context.set('surplusOnSince', null);\n  context.set('surplusOffSince', null);\n  var outs = { 0:plugCmd(false), 1:logPayload(eventName, {reason:reason, soc:soc, surplus:Math.round(surplus_now), batt_power:Math.round(batt_power), curtailed:curtailed, mppt288_power:Math.round(mppt288_power), mppt289_power:Math.round(mppt289_power), ac:ac_load}), 2:statusMsg };\n  if (classTag === 'safety') outs[3] = anomalyPayload(reason, {soc:soc, ac:ac_load, surplus:Math.round(surplus_now)});\n  return emitMany(outs);\n}\n\nif (anyStale && STALE_TOPIC_FAIL_OPEN) {\n  if (hwState === 'on') return tripOff('off_topic_stale', 'stale: '+staleList.join(','), 'safety');\n  return emitMany({ 2: statusMsg });\n}\nif (soc >= 0 && soc < SOC_OFF_PCT) {\n  if (hwState === 'on') return tripOff('off_soc_floor', 'SOC '+soc+'% < '+SOC_OFF_PCT+'%', 'safety');\n  return emitMany({ 2: statusMsg });\n}\nif (ac_load > AC_SAFETY_W) {\n  if (hwState === 'on') return tripOff('off_ac_cap', 'ac_load '+Math.round(ac_load)+'W > '+AC_SAFETY_W+'W', 'safety');\n  return emitMany({ 2: statusMsg });\n}\n\nif (mode === 'LOCKOUT') {\n  if (hwState === 'on') return tripOff('off_mode_lockout', 'mode\u2192LOCKOUT', 'lifecycle');\n  return emitMany({ 2: statusMsg });\n}\n\n// DISPATCH \u2014 OFF eval (relaxed during curtailment)\nif (hwState === 'on') {\n  if (surplus_now <= off_thresh) {\n    if (!surplusOffSince) { surplusOffSince = t; context.set('surplusOffSince', t); }\n    if ((t - surplusOffSince) >= off_sust) {\n      var reasonStr = 'surplus ' + Math.round(surplus_now) + 'W \u2264 ' + off_thresh + 'W (' + (curtailed ? 'mppt_curtailed='+mppt_curtailed+' heuristic_curtailed='+curtailed_heuristic+' relaxed' : 'not curtailed') + ', sustain ' + off_sust/1000 + 's)';\n      return tripOff('off_surplus', reasonStr, 'normal');\n    } else if (curtailed) {\n      counters.mppt_curtailment_holds = num(counters.mppt_curtailment_holds,0) + 1;\n      context.set('counters', counters);\n    }\n  } else {\n    if (surplusOffSince) context.set('surplusOffSince', null);\n  }\n  return emitMany({ 2: statusMsg });\n}\n\n// hwState === 'off' \u2014 evaluate ON\nvar surplusOk = (surplus_now >= SURPLUS_ON_W) || (curtailed && soc >= SOC_ON_PCT);\nvar pointGates = { surplus_ok: surplusOk, ac_ok: ac_after_on <= AC_CAP_W, soc_ok: soc >= SOC_ON_PCT };\nvar allOk = Object.keys(pointGates).every(function(k){ return pointGates[k]; });\n\nif (allOk) {\n  if (!surplusOnSince) { surplusOnSince = t; context.set('surplusOnSince', t); }\n  if ((t - surplusOnSince) >= SUSTAIN_ON_MS) {\n    counters.on_transitions = num(counters.on_transitions,0)+1;\n    if (curtailed) counters.curtailment_on_hits = num(counters.curtailment_on_hits,0)+1;\n    counters.last_on = iso();\n    context.set('counters', counters);\n    context.set('hwState', 'on');\n    context.set('onStartedAt', t);\n    context.set('surplusOnSince', null);\n    context.set('surplusOffSince', null);\n    var eventName = curtailed ? 'on_curtailment' : 'on_surplus';\n    return emitMany({\n      0: plugCmd(true),\n      1: logPayload(eventName, {surplus:Math.round(surplus_now), surplus_after_on:Math.round(surplus_after_on), soc:soc, ac:ac_load, batt_power:Math.round(batt_power), curtailed:curtailed, curtailed_heuristic:curtailed_heuristic, mppt_curtailed:mppt_curtailed, mppt288_power:Math.round(mppt288_power), mppt289_power:Math.round(mppt289_power)}),\n      2: statusMsg\n    });\n  }\n} else {\n  if (surplusOnSince) context.set('surplusOnSince', null);\n}\n\nreturn emitMany({ 2: statusMsg });",
+    "outputs": 5,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 760,
+    "y": 240,
+    "wires": [
+      [
+        "2e16c9d59bfa60f3"
+      ],
+      [
+        "hwv3.out.log"
+      ],
+      [
+        "hwv3.out.status"
+      ],
+      [
+        "hwv3.out.anomaly"
+      ],
+      [
+        "hwv3.out.daily"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.fn.sunrise",
+    "type": "function",
+    "z": "hwv3.tab",
+    "name": "sunrise cron",
+    "func": "// TEMP PATCH 2026-06-01: hard-set today's sunrise/sunset to AEST 05:30/17:30\n// pending proper astronomical fix for the date-attachment bug in v1 of this cron.\nfunction aestISO(h, m) {\n  var nowAest = new Date(Date.now() + 10*3600*1000);\n  var y = nowAest.getUTCFullYear();\n  var mo = nowAest.getUTCMonth();\n  var d = nowAest.getUTCDate();\n  return new Date(Date.UTC(y, mo, d, h - 10, m, 0)).toISOString();\n}\nvar srISO = aestISO(5, 30);\nvar ssISO = aestISO(17, 30);\nflow.set('sunrise', srISO);\nflow.set('sunset',  ssISO);\nreturn { topic: 'bsf/hotwater/log', payload: { ts: new Date().toISOString(), event: 'sunrise_cron_temp_patch', sunrise: srISO, sunset: ssISO, note: 'fixed 05:30-17:30 AEST until astronomical algorithm is corrected' } };",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 710,
+    "y": 700,
+    "wires": [
+      [
+        "hwv3.out.log"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.fn.lockout",
+    "type": "function",
+    "z": "hwv3.tab",
+    "name": "lockout loop",
+    "func": "// =============================================================\n// HOT WATER v3 \u2014 LOCKOUT LOOP (function node, 3 outputs)\n//\n// Banksia Springs Farm \u2014 written 2026-06-01.\n// Plan: ~/Documents/wikis/bsf/hot-water-v3-dispatch-plan.md \u00a75\n//\n// PURPOSE\n//   Fires every 5 minutes from an inject node (cron \"*/5 * * * *\").\n//   Independent of the dispatcher so it works even if the dispatcher\n//   is wedged or restarting.\n//\n//   If mode === \"LOCKOUT\" (i.e. we're outside today's sunrise/sunset\n//   window): publish OFF to the plug, unconditionally. If the plug\n//   appears to be ON when we run, also emit an anomaly event \u2014 that's\n//   the mouse-on-button signal (or a manual press, MQTT desync, etc).\n//\n//   If mode === \"DISPATCH\": do nothing \u2014 the dispatcher is in charge.\n//\n// INPUT\n//   msg from a 5-min inject; payload ignored.\n//\n// OUTPUTS\n//   [0] plug_cmd       \u2014 { payload: {dps:\"1\", set:false} } (only in LOCKOUT)\n//   [1] log_event      \u2014 { topic:\"bsf/hotwater/log\", payload:{...} }\n//   [2] anomaly_event  \u2014 { topic:\"bsf/hotwater/anomaly\", payload:{...} }\n//                        only when plug was found ON during lockout\n// =============================================================\n\nfunction iso() { return new Date().toISOString(); }\nfunction plugOff() { return { payload: { dps: \"1\", set: false } }; }\n\nvar mode = flow.get(\"mode\");\n\n// Read the aggregator's cache directly so we don't depend on the\n// dispatcher being alive. We just want plug_state to flag anomalies.\nvar cache = flow.get(\"agg_cache\") || {};\nvar plugEntry = cache.plug_state;\nvar plugState = plugEntry ? !!plugEntry.value : null;\nvar plugStale = (!plugEntry || (Date.now() - plugEntry.ts) > (5 * 60 * 1000));\n\n// Fail-safe: if mode is undefined (dispatcher hasn't run yet, e.g.\n// Cerbo just rebooted, MQTT not flowing), assume LOCKOUT. Cheaper to\n// fire a spurious OFF than to leave the plug uncontrolled.\nif (mode === undefined || mode === null) { mode = \"LOCKOUT\"; }\n\nif (mode !== \"LOCKOUT\") {\n    // Dispatch mode: do nothing. We don't even log \u2014 too noisy.\n    return null;\n}\n\n// LOCKOUT. Force OFF unconditionally.\nvar foundOn = (plugState === true);\n\n// Bookkeeping for the daily summary. Function nodes have their own\n// context; we share with the dispatcher via flow.lockout_anomalies,\n// which the dispatcher reads at 23:00 and resets.\nvar lockoutAnomalies = flow.get(\"lockout_anomalies\") || 0;\nif (foundOn) {\n    lockoutAnomalies++;\n    flow.set(\"lockout_anomalies\", lockoutAnomalies);\n}\n\nvar logMsg = {\n    topic: \"bsf/hotwater/log\",\n    payload: {\n        ts: iso(),\n        event: \"lockout_force_off\",\n        plug_state_at_check: plugState,\n        plug_state_stale: plugStale,\n        found_on: foundOn,\n        anomaly_count_today: lockoutAnomalies\n    }\n};\n\nvar outs = [ plugOff(), logMsg, null ];\n\nif (foundOn) {\n    outs[2] = {\n        topic: \"bsf/hotwater/anomaly\",\n        payload: {\n            ts: iso(),\n            reason: \"plug ON during LOCKOUT \u2014 likely manual button press or input desync\",\n            source: \"lockout_loop\",\n            plug_state_at_check: plugState,\n            anomaly_count_today: lockoutAnomalies\n        }\n    };\n    node.warn(\"lockout: plug found ON outside window \u2014 forcing OFF. count today=\" + lockoutAnomalies);\n}\n\nreturn outs;\n",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 750,
+    "y": 820,
+    "wires": [
+      [
+        "2e16c9d59bfa60f3"
+      ],
+      [
+        "hwv3.out.log"
+      ],
+      [
+        "hwv3.out.anomaly"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.out.log",
+    "type": "mqtt out",
+    "z": "hwv3.tab",
+    "name": "log \u2192 bsf/hotwater/log",
+    "topic": "bsf/hotwater/log",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1080,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "hwv3.out.status",
+    "type": "mqtt out",
+    "z": "hwv3.tab",
+    "name": "status \u2192 bsf/hotwater/status",
+    "topic": "bsf/hotwater/status",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1080,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "hwv3.out.anomaly",
+    "type": "mqtt out",
+    "z": "hwv3.tab",
+    "name": "anomaly \u2192 bsf/hotwater/anomaly",
+    "topic": "bsf/hotwater/anomaly",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1080,
+    "y": 360,
+    "wires": []
+  },
+  {
+    "id": "hwv3.out.daily",
+    "type": "mqtt out",
+    "z": "hwv3.tab",
+    "name": "daily \u2192 bsf/hotwater/daily",
+    "topic": "bsf/hotwater/daily",
+    "qos": "1",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1080,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "hwv3.out.plug",
+    "type": "comment",
+    "z": "hwv3.tab",
+    "name": "\u2190 Phase 2: wire dispatcher.out[0] AND lockout.out[0] to the existing 'tuya-smart-device Hot Water' node in SOC Load Shedding tab",
+    "info": "Phase 2 step (do by hand, then Deploy):\n\n1. Drag a wire from dispatcher.out[0] across to the tuya-smart-device 'Hot Water' node in the 'SOC Load Shedding' tab.\n2. Drag a wire from lockout.out[0] to the same tuya-smart-device node.\n3. In 'SOC Load Shedding' tab: delete the wire from hw-fn.out[0] (plug-cmd output) to hot-water-tuya. Leave hw-fn itself in place \u2014 that's your one-click rollback.\n4. Click Deploy (modified flows only).\n5. Watch VRM + bsf/hotwater/status for 30 min.",
+    "x": 1080,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "hwv3.v.pv_dc",
+    "type": "victron-input-system",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Pv/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system",
+      "communityTag": "system"
+    },
+    "pathObj": {
+      "path": "/Dc/Pv/Power",
+      "type": "float",
+      "name": "Total DC PV (W)"
+    },
+    "name": "pv_dc",
+    "onlyChanges": false,
+    "roundValues": "0",
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 210,
+    "y": 120,
+    "wires": [
+      [
+        "hwv3.ch.pv_dc"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.ch.pv_dc",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=pv_dc",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "pv_dc",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 120,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.pv_fronius",
+    "type": "victron-input-system",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.system/0",
+    "path": "/Ac/PvOnOutput/L1/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system",
+      "communityTag": "system"
+    },
+    "pathObj": {
+      "path": "/Ac/PvOnOutput/L1/Power",
+      "type": "float",
+      "name": "Fronius AC-coupled (W)"
+    },
+    "name": "pv_fronius",
+    "onlyChanges": false,
+    "roundValues": "0",
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 200,
+    "y": 180,
+    "wires": [
+      [
+        "hwv3.ch.pv_fronius"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.ch.pv_fronius",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=pv_fronius",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "pv_fronius",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 180,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.ac_load",
+    "type": "victron-input-system",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.system/0",
+    "path": "/Ac/Consumption/L1/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system",
+      "communityTag": "system"
+    },
+    "pathObj": {
+      "path": "/Ac/Consumption/L1/Power",
+      "type": "float",
+      "name": "AC consumption L1 (W)"
+    },
+    "name": "ac_load",
+    "onlyChanges": false,
+    "roundValues": "0",
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 210,
+    "y": 240,
+    "wires": [
+      [
+        "hwv3.ch.ac_load"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.ch.ac_load",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=ac_load",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "ac_load",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 240,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.soc",
+    "type": "victron-input-system",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Soc",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system",
+      "communityTag": "system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Soc",
+      "type": "float",
+      "name": "Battery SOC (%)"
+    },
+    "name": "soc",
+    "onlyChanges": false,
+    "roundValues": "0",
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 210,
+    "y": 300,
+    "wires": [
+      [
+        "hwv3.ch.soc"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.ch.soc",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=soc",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "soc",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 300,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.batt_power",
+    "type": "victron-input-system",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.system/0",
+    "path": "/Dc/Battery/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.system/0",
+      "name": "Venus system",
+      "communityTag": "system"
+    },
+    "pathObj": {
+      "path": "/Dc/Battery/Power",
+      "type": "float",
+      "name": "Battery power (W)"
+    },
+    "name": "batt_power",
+    "onlyChanges": false,
+    "roundValues": "0",
+    "conditionalMode": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "debounce": "",
+    "x": 190,
+    "y": 360,
+    "wires": [
+      [
+        "hwv3.ch.batt_power"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.ch.batt_power",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=batt_power",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "batt_power",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 360,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.in.plug_state",
+    "type": "mqtt in",
+    "z": "hwv3.tab",
+    "name": "plug_state",
+    "topic": "bsf/hotwater/plug_state",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 240,
+    "y": 440,
+    "wires": [
+      [
+        "hwv3.ch.plug_state"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.in.plug_power",
+    "type": "mqtt in",
+    "z": "hwv3.tab",
+    "name": "plug_power",
+    "topic": "bsf/hotwater/plug_power",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 250,
+    "y": 500,
+    "wires": [
+      [
+        "hwv3.fn.agg",
+        "hwv3.ch.plug_power"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.ch.plug_state",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=plug_state",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "plug_state",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 430,
+    "y": 420,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.ch.plug_power",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=plug_power",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "plug_power",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 450,
+    "y": 460,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "test.ac_on4",
+    "type": "inject",
+    "z": "hwv3.tab",
+    "name": "AC ON",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0,
+    "topic": "",
+    "payload": "{\"dps\":\"2\",\"set\":true}",
+    "payloadType": "json",
+    "x": 70,
+    "y": 140,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "test.ac_off4",
+    "type": "inject",
+    "z": "hwv3.tab",
+    "name": "AC OFF",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0,
+    "topic": "",
+    "payload": "{\"dps\":\"2\",\"set\":false}",
+    "payloadType": "json",
+    "x": 70,
+    "y": 220,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "2e16c9d59bfa60f3",
+    "type": "link out",
+    "z": "hwv3.tab",
+    "name": "hwv3.link.plugCmd",
+    "mode": "link",
+    "links": [
+      "b3ca21a4de4a338b",
+      "8309d2935a2e2894"
+    ],
+    "x": 1545,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "4838cf1a2f97928e",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/258",
+    "path": "/State",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/258",
+      "name": "BlueSolar 258"
+    },
+    "pathObj": {
+      "path": "/State",
+      "name": "/State"
+    },
+    "initial": "",
+    "name": "mppt288_state",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 600,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "c4739a1223c4044b",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt288_state",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt288_state",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 600,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "fd00221e7ec50c4d",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/258",
+    "path": "/Yield/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/258",
+      "name": "BlueSolar 258"
+    },
+    "pathObj": {
+      "path": "/Yield/Power",
+      "name": "/Yield/Power"
+    },
+    "initial": "",
+    "name": "mppt288_power",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 650,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "b35e67bb22820114",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt288_power",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt288_power",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 650,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "01d772ec1556f281",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/259",
+    "path": "/State",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/259",
+      "name": "BlueSolar 259"
+    },
+    "pathObj": {
+      "path": "/State",
+      "name": "/State"
+    },
+    "initial": "",
+    "name": "mppt289_state",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 700,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "1a50482113064f37",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt289_state",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt289_state",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 700,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "c2775926e3a526dd",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/259",
+    "path": "/Yield/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/259",
+      "name": "BlueSolar 259"
+    },
+    "pathObj": {
+      "path": "/Yield/Power",
+      "name": "/Yield/Power"
+    },
+    "initial": "",
+    "name": "mppt289_power",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 750,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "2853133a7de33759",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt289_power",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt289_power",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 750,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "368a5c16872f368e",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/288",
+    "path": "/State",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/288",
+      "name": "probe 288"
+    },
+    "pathObj": {
+      "path": "/State",
+      "name": "/State"
+    },
+    "initial": "",
+    "name": "mppt_x288_state",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 800,
+    "wires": [
+      [
+        "e778a2c79688ace6"
+      ]
+    ]
+  },
+  {
+    "id": "e778a2c79688ace6",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt_x288_state",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt_x288_state",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 800,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "85e28adecbee8948",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/288",
+    "path": "/Yield/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/288",
+      "name": "probe 288"
+    },
+    "pathObj": {
+      "path": "/Yield/Power",
+      "name": "/Yield/Power"
+    },
+    "initial": "",
+    "name": "mppt_x288_power",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 850,
+    "wires": [
+      [
+        "6a2d4c1f4d61d1f2"
+      ]
+    ]
+  },
+  {
+    "id": "6a2d4c1f4d61d1f2",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt_x288_power",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt_x288_power",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 850,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "75c145d3ae0a1fce",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/289",
+    "path": "/State",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/289",
+      "name": "probe 289"
+    },
+    "pathObj": {
+      "path": "/State",
+      "name": "/State"
+    },
+    "initial": "",
+    "name": "mppt_x289_state",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 900,
+    "wires": [
+      [
+        "b347b64fdc64c989"
+      ]
+    ]
+  },
+  {
+    "id": "b347b64fdc64c989",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt_x289_state",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt_x289_state",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 900,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "10e2d51e39cff93a",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/289",
+    "path": "/Yield/Power",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/289",
+      "name": "probe 289"
+    },
+    "pathObj": {
+      "path": "/Yield/Power",
+      "name": "/Yield/Power"
+    },
+    "initial": "",
+    "name": "mppt_x289_power",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 950,
+    "wires": [
+      [
+        "8704ded35ab375d4"
+      ]
+    ]
+  },
+  {
+    "id": "8704ded35ab375d4",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mppt_x289_power",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mppt_x289_power",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 320,
+    "y": 950,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.tuya.ac",
+    "type": "tuya-smart-device",
+    "z": "bridges.tab",
+    "deviceName": "ac-plug-outside-temp",
+    "deviceId": "__TUYA_DEVICE_AC__",
+    "deviceKey": "__TUYA_LOCAL_KEY_AC__",
+    "deviceIp": "__TUYA_LOCAL_IP_AC__",
+    "retryTimeout": "1000",
+    "findTimeout": "1000",
+    "tuyaVersion": "3.1",
+    "eventMode": "event-both",
+    "x": 380,
+    "y": 200,
+    "wires": [
+      [
+        "bridge.fn.ac_state",
+        "bridge.fn.ac_power",
+        "bridge.fn.ac_temp"
+      ],
+      [
+        "bridge.fn.ac_power"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.tuya.inside",
+    "type": "tuya-smart-device",
+    "z": "bridges.tab",
+    "deviceName": "inside-temp-plug",
+    "deviceId": "__TUYA_DEVICE_INSIDE__",
+    "deviceKey": "__TUYA_LOCAL_KEY_INSIDE__",
+    "deviceIp": "__TUYA_LOCAL_IP_INSIDE__",
+    "retryTimeout": "1000",
+    "findTimeout": "1000",
+    "tuyaVersion": "3.1",
+    "x": 380,
+    "y": 400,
+    "wires": [
+      [
+        "bridge.fn.inside_temp"
+      ],
+      [
+        "bridge.fn.inside_temp"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.fn.hw_power",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "extract HW plug_power (DPS19/10)",
+    "func": "if (msg.payload && msg.payload.data && msg.payload.data.dps && msg.payload.data.dps[\"19\"] !== undefined) {\n    return { topic: \"bsf/hotwater/plug_power\", payload: Number(msg.payload.data.dps[\"19\"]) / 10 };\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 80,
+    "wires": [
+      [
+        "bridge.out.hw_power"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.fn.hw_state",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "extract HW plug_state (DPS1)",
+    "func": "if (msg.payload && msg.payload.data && msg.payload.data.dps && msg.payload.data.dps[\"1\"] !== undefined) {\n    return { topic: \"bsf/hotwater/plug_state\", payload: !!msg.payload.data.dps[\"1\"] };\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 140,
+    "wires": [
+      [
+        "bridge.out.hw_state"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.fn.ac_state",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "extract AC plug_state (DPS2)",
+    "func": "if (msg.payload && msg.payload.data && msg.payload.data.dps && msg.payload.data.dps[\"2\"] !== undefined) {\n    var st = !!msg.payload.data.dps[\"2\"];\n    flow.set(\"ac_plug_state\", st);\n    flow.set(\"ac_plug_state_ts\", Date.now());\n    return { topic: \"bsf/ac/plug_state\", payload: st };\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 200,
+    "wires": [
+      [
+        "bridge.out.ac_state"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.fn.ac_power",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "extract AC plug_power (DPS19/10)",
+    "func": "if (msg.payload && msg.payload.data && msg.payload.data.dps && msg.payload.data.dps[\"19\"] !== undefined) {\n    var w = Number(msg.payload.data.dps[\"19\"]) / 10;\n    flow.set(\"ac_plug_power_w\", w);\n    flow.set(\"ac_plug_power_ts\", Date.now());\n    return { topic: \"bsf/ac/plug_power\", payload: w };\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 260,
+    "wires": [
+      [
+        "bridge.out.ac_power"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.fn.ac_temp",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "extract outside_temp (DPS18/10)",
+    "func": "if (msg.payload && msg.payload.data && msg.payload.data.dps && msg.payload.data.dps[\"18\"] !== undefined) {\n    return { topic: \"bsf/ac/outside_temp\", payload: Number(msg.payload.data.dps[\"18\"]) / 10 };\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 320,
+    "wires": [
+      [
+        "bridge.out.ac_temp"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.fn.inside_temp",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "extract inside_temp (DPS18/10)",
+    "func": "if (msg.payload && msg.payload.data && msg.payload.data.dps && msg.payload.data.dps[\"18\"] !== undefined) {\n    return { topic: \"bsf/ac/inside_temp\", payload: Number(msg.payload.data.dps[\"18\"]) / 10 };\n}\nreturn null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 400,
+    "wires": [
+      [
+        "bridge.out.inside_temp"
+      ]
+    ]
+  },
+  {
+    "id": "bridge.out.hw_power",
+    "type": "mqtt out",
+    "z": "bridges.tab",
+    "name": "\u2192 bsf/hotwater/plug_power",
+    "topic": "bsf/hotwater/plug_power",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1000,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "bridge.out.hw_state",
+    "type": "mqtt out",
+    "z": "bridges.tab",
+    "name": "\u2192 bsf/hotwater/plug_state",
+    "topic": "bsf/hotwater/plug_state",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1000,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "bridge.out.ac_state",
+    "type": "mqtt out",
+    "z": "bridges.tab",
+    "name": "\u2192 bsf/ac/plug_state",
+    "topic": "bsf/ac/plug_state",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1000,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "bridge.out.ac_power",
+    "type": "mqtt out",
+    "z": "bridges.tab",
+    "name": "\u2192 bsf/ac/plug_power",
+    "topic": "bsf/ac/plug_power",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1000,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "bridge.out.ac_temp",
+    "type": "mqtt out",
+    "z": "bridges.tab",
+    "name": "\u2192 bsf/ac/outside_temp",
+    "topic": "bsf/ac/outside_temp",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1000,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "bridge.out.inside_temp",
+    "type": "mqtt out",
+    "z": "bridges.tab",
+    "name": "\u2192 bsf/ac/inside_temp",
+    "topic": "bsf/ac/inside_temp",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 1000,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "fa8d333daaae4c24",
+    "type": "link in",
+    "z": "bridges.tab",
+    "name": "bridges.link.acPlugCmd",
+    "links": [
+      "6ed7e9e95e1e37ad"
+    ],
+    "x": 200,
+    "y": 200,
+    "wires": [
+      [
+        "c6acf858451937df"
+      ]
+    ],
+    "icon": "link-out.svg"
+  },
+  {
+    "id": "d135958d8855d7b0",
+    "type": "inject",
+    "z": "bridges.tab",
+    "name": "TEST: AC plug ON dps1 string",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"dps\":\"1\",\"set\":true}",
+    "payloadType": "json",
+    "x": 180,
+    "y": 140,
+    "wires": [
+      [
+        "bridge.tuya.ac",
+        "c6acf858451937df"
+      ]
+    ],
+    "info": "Temporary LAN-isolation test"
+  },
+  {
+    "id": "c6acf858451937df",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "ac_cloud_signer",
+    "func": "const CLIENT_ID = '__TUYA_ACCESS_ID__';\nconst SECRET = '__TUYA_ACCESS_SECRET__';\nconst BASE_HOST = '__TUYA_API_HOST__';\nconst AC_DEV_ID = '__TUYA_DEVICE_AC__';\n\nconst sha256 = s => crypto.createHash('sha256').update(s||'').digest('hex');\nconst hmac = (k,s) => crypto.createHmac('sha256',k).update(s).digest('hex').toUpperCase();\n\nfunction httpJson(method, path, headers, bodyStr) {\n  return new Promise((resolve) => {\n    const opts = {hostname: BASE_HOST, port: 443, path, method, headers, timeout: 10000};\n    const req = https.request(opts, res => {\n      let data = '';\n      res.on('data', c => data += c);\n      res.on('end', () => { try { resolve({status: res.statusCode, json: JSON.parse(data)}); } catch(e) { resolve({status: res.statusCode, raw: data}); } });\n    });\n    req.on('error', e => resolve({error: e.message}));\n    req.on('timeout', () => { req.destroy(); resolve({error:'timeout'}); });\n    if (bodyStr) req.write(bodyStr);\n    req.end();\n  });\n}\n\nasync function fetchToken() {\n  const t = Date.now();\n  const path = '/v1.0/token?grant_type=1';\n  const ss = 'GET\\n' + sha256('') + '\\n\\n' + path;\n  const sign = hmac(SECRET, CLIENT_ID + t + ss);\n  const r = await httpJson('GET', path, {client_id: CLIENT_ID, sign, sign_method: 'HMAC-SHA256', t: String(t)}, null);\n  if (!r.json || !r.json.success) throw new Error('token: ' + JSON.stringify(r).slice(0,200));\n  flow.set('tuya_token', r.json.result.access_token);\n  flow.set('tuya_token_exp', Date.now() + (r.json.result.expire_time - 60) * 1000);\n  return r.json.result.access_token;\n}\n\nasync function getToken() {\n  let token = flow.get('tuya_token');\n  if (!token || Date.now() >= (flow.get('tuya_token_exp') || 0)) token = await fetchToken();\n  return token;\n}\n\nasync function signedCall(method, path, body) {\n  const token = await getToken();\n  const t = Date.now();\n  const bodyStr = body ? JSON.stringify(body) : '';\n  const ss = method + '\\n' + sha256(bodyStr) + '\\n\\n' + path;\n  const sign = hmac(SECRET, CLIENT_ID + token + t + ss);\n  const headers = {client_id: CLIENT_ID, access_token: token, sign, sign_method: 'HMAC-SHA256', t: String(t)};\n  if (body) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = Buffer.byteLength(bodyStr); }\n  return await httpJson(method, path, headers, body ? bodyStr : null);\n}\n\n// === Input handling ===\nconst p = msg.payload || {};\nconst deviceId = msg.tuya_device_id || AC_DEV_ID;\n\n// Status query mode: msg.payload = {query: 'status'} (or msg.tuya_query='status')\nif (p.query === 'status' || msg.tuya_query === 'status') {\n  try {\n    const r = await signedCall('GET', '/v1.0/iot-03/devices/' + deviceId + '/status', null);\n    msg.payload = r;\n    flow.set('cs_last_status', JSON.stringify(r).slice(0,800));\n  } catch (e) { msg.payload = {error: String(e)}; }\n  return msg;\n}\n\n// Command mode\nlet commands;\nif (Array.isArray(p.commands)) commands = p.commands;\nelse if (p.dps !== undefined && p.set !== undefined) commands = [{code: 'switch_' + p.dps, value: !!p.set}];\nelse { flow.set('cs_last_error', 'unrecognised: ' + JSON.stringify(p)); return msg; }\n\n// === Idempotency: skip if last sent command identical ===\nconst cmdKey = deviceId + '|' + JSON.stringify(commands);\nconst lastKey = flow.get('cs_last_cmdkey');\nconst lastAt = flow.get('cs_last_cmdkey_at') || 0;\n// Only skip if same command sent within last 60s AND last result was success\nif (cmdKey === lastKey && (Date.now() - lastAt) < 600000 && flow.get('cs_last_success')) {\n  flow.set('cs_skipped', (flow.get('cs_skipped')||0) + 1);\n  msg.payload = {skipped: true, reason: 'duplicate within 60s', commands};\n  return msg;\n}\n\nconst c = (flow.get('cs_invocations')||0) + 1;\nflow.set('cs_invocations', c);\nflow.set('cs_last_run', new Date().toISOString());\nflow.set('cs_last_commands', JSON.stringify(commands));\n\ntry {\n  const result = await signedCall('POST', '/v1.0/iot-03/devices/' + deviceId + '/commands', {commands});\n  flow.set('cs_last_result', JSON.stringify(result).slice(0,500));\n  const ok = !!(result.json && result.json.success);\n  flow.set('cs_last_success', ok);\n  if (ok) {\n    flow.set('cs_last_cmdkey', cmdKey);\n    flow.set('cs_last_cmdkey_at', Date.now());\n  }\n  msg.payload = result;\n} catch (e) {\n  flow.set('cs_last_error', String(e).slice(0,400));\n  flow.set('cs_last_success', false);\n  msg.payload = {error: String(e)};\n}\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "https",
+        "module": "https"
+      }
+    ],
+    "x": 180,
+    "y": 280,
+    "wires": [
+      [
+        "4d12662e5c8d44b4"
+      ]
+    ],
+    "info": "Tuya cloud signer + sender. Reads creds from env vars. See public manual for HMAC sign pattern."
+  },
+  {
+    "id": "4d12662e5c8d44b4",
+    "type": "debug",
+    "z": "bridges.tab",
+    "name": "SPY: cloud signer out",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 480,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "da5720e2fd35aaf4",
+    "type": "inject",
+    "z": "bridges.tab",
+    "name": "TEST: status query",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"query\":\"status\"}",
+    "payloadType": "json",
+    "x": -20,
+    "y": 340,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "79cb66c2a216ef5e",
+    "type": "mqtt in",
+    "z": "bridges.tab",
+    "name": "MPPT discovery wildcard",
+    "topic": "N/__VRM_PORTAL_ID__/solarcharger/+/State",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "hwv3.broker",
+    "inputs": 0,
+    "x": 200,
+    "y": 600,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ed7427caf3800e79",
+    "type": "function",
+    "z": "bridges.tab",
+    "name": "log MPPT discovery",
+    "func": "const m = msg.topic.match(/solarcharger\\/(\\d+)\\/State/); if (m) { const inst = m[1]; const found = flow.get('mppt_instances_discovered') || {}; found[inst] = { last_state: msg.payload, last_ts: new Date().toISOString() }; flow.set('mppt_instances_discovered', found); } return null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 480,
+    "y": 600,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "971790f8c3a4d419",
+    "type": "inject",
+    "z": "acv15.tab",
+    "name": "poll inside-temp (60s)",
+    "props": [
+      {
+        "p": "payload",
+        "v": "RECONNECT",
+        "vt": "str"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "str",
+    "x": 160,
+    "y": 460,
+    "wires": [
+      [
+        "4fc2f4cb849c2127"
+      ]
+    ]
+  },
+  {
+    "id": "4fc2f4cb849c2127",
+    "type": "function",
+    "z": "acv15.tab",
+    "name": "tuya_poll_inside_temp",
+    "func": "// tuya_poll_inside_temp \u2014 polls Tuya cloud for inside-temp-plug status, emits temp.\n// Triggered by 60s inject. Uses libs: crypto, https.\n// Output: { topic: 'inside_temp', payload: <celsius> } \u2192 mqtt out.\n\nconst API_KEY = '__TUYA_ACCESS_ID__';\nconst API_SECRET = '__TUYA_ACCESS_SECRET__';\nconst DEVICE_ID = '__TUYA_DEVICE_INSIDE__';\nconst HOST = '__TUYA_API_HOST__';\n\nconst EMPTY_SHA256 = crypto.createHash('sha256').update('').digest('hex');\n\nfunction sign(secret, str) {\n    return crypto.createHmac('sha256', secret).update(str).digest('hex').toUpperCase();\n}\n\nfunction makeNonce() {\n    return crypto.randomBytes(8).toString('hex');\n}\n\nfunction tuyaGet(path, accessToken) {\n    return new Promise(function(resolve, reject) {\n        const t = Date.now().toString();\n        const nonce = makeNonce();\n        const stringToSign = 'GET\\n' + EMPTY_SHA256 + '\\n\\n' + path;\n        const signStr = accessToken\n            ? API_KEY + accessToken + t + nonce + stringToSign\n            : API_KEY + t + nonce + stringToSign;\n        const signature = sign(API_SECRET, signStr);\n        const headers = {\n            client_id: API_KEY,\n            sign: signature,\n            sign_method: 'HMAC-SHA256',\n            t: t,\n            nonce: nonce,\n        };\n        if (accessToken) headers.access_token = accessToken;\n        const req = https.request({\n            hostname: HOST, path: path, method: 'GET', headers: headers, timeout: 8000,\n        }, function(res) {\n            let body = '';\n            res.on('data', function(c) { body += c; });\n            res.on('end', function() {\n                try { resolve(JSON.parse(body)); } catch (e) { reject(e); }\n            });\n        });\n        req.on('error', reject);\n        req.on('timeout', function() { req.destroy(new Error('timeout')); });\n        req.end();\n    });\n}\n\n(async function() {\n    try {\n        let token = flow.get('tuya_token');\n        let tokenExp = flow.get('tuya_token_expires') || 0;\n        const now = Date.now();\n        if (!token || now > tokenExp) {\n            const tr = await tuyaGet('/v1.0/token?grant_type=1', null);\n            if (!tr.success) throw new Error('token: ' + (tr.msg || JSON.stringify(tr).substring(0,80)));\n            token = tr.result.access_token;\n            flow.set('tuya_token', token);\n            flow.set('tuya_token_expires', now + (tr.result.expire_time - 60) * 1000);\n        }\n        const sr = await tuyaGet('/v1.0/devices/' + DEVICE_ID + '/status', token);\n        if (!sr.success) throw new Error('status: ' + (sr.msg || JSON.stringify(sr).substring(0,80)));\n        const tempDp = sr.result.find(function(dp) { return dp.code === 'va_temperature' || dp.code === 'temp_current' || dp.code === 'cur_temperature' || String(dp.code) === '18' || String(dp.code) === '8' || String(dp.code) === '101'; });\n        if (!tempDp) throw new Error('no temp DP in: ' + JSON.stringify(sr.result).substring(0,200));\n        const tempC = parseFloat(tempDp.value) / 10;\n        flow.set('ac_inside_temp', tempC);\n        flow.set('ac_inside_temp_ts', Date.now());\n        node.status({ fill: 'green', shape: 'dot', text: tempC.toFixed(1) + '\u00b0C @ ' + new Date().toLocaleTimeString() });\n    } catch (e) {\n        node.error('Tuya poll failed: ' + e.message, msg);\n        node.status({ fill: 'red', shape: 'dot', text: 'err: ' + e.message.substring(0, 40) });\n    }\n})();\n\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      },
+      {
+        "var": "https",
+        "module": "https"
+      }
+    ],
+    "x": 380,
+    "y": 460,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "data.in.hw_log",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "hw log",
+    "topic": "bsf/hotwater/log",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 140,
+    "wires": [
+      [
+        "b19a9e516a43b133"
+      ]
+    ]
+  },
+  {
+    "id": "data.in.hw_anom",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "hw anomaly",
+    "topic": "bsf/hotwater/anomaly",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 180,
+    "wires": [
+      [
+        "b19a9e516a43b133"
+      ]
+    ]
+  },
+  {
+    "id": "data.in.hw_daily",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "hw daily",
+    "topic": "bsf/hotwater/daily",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 220,
+    "wires": [
+      [
+        "ff28de21a53a16d9"
+      ]
+    ]
+  },
+  {
+    "id": "data.in.ac_log",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "ac log",
+    "topic": "bsf/ac/log",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 260,
+    "wires": [
+      [
+        "b19a9e516a43b133"
+      ]
+    ]
+  },
+  {
+    "id": "data.in.ac_anom",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "ac anomaly",
+    "topic": "bsf/ac/anomaly",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 300,
+    "wires": [
+      [
+        "b19a9e516a43b133"
+      ]
+    ]
+  },
+  {
+    "id": "data.in.ac_daily",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "ac daily",
+    "topic": "bsf/ac/daily",
+    "qos": "1",
+    "datatype": "auto-detect",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 340,
+    "wires": [
+      [
+        "ff28de21a53a16d9"
+      ]
+    ]
+  },
+  {
+    "id": "data.in.hw_status",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "hw status",
+    "topic": "bsf/hotwater/status",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 400,
+    "wires": [
+      [
+        "data.fn.cache_hw"
+      ]
+    ]
+  },
+  {
+    "id": "data.fn.cache_hw",
+    "type": "function",
+    "z": "data.tab",
+    "name": "cache hw_latest",
+    "func": "flow.set(\"hw_latest\", msg.payload); flow.set(\"hw_latest_ts\", Date.now()); return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 400,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "data.in.ac_status",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "ac status",
+    "topic": "bsf/ac/status",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 440,
+    "wires": [
+      [
+        "data.fn.cache_ac"
+      ]
+    ]
+  },
+  {
+    "id": "data.fn.cache_ac",
+    "type": "function",
+    "z": "data.tab",
+    "name": "cache ac_latest",
+    "func": "flow.set(\"ac_latest\", msg.payload); flow.set(\"ac_latest_ts\", Date.now()); return null;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 440,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "data.inject.snap",
+    "type": "inject",
+    "z": "data.tab",
+    "name": "30s snapshot tick",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "10",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 500,
+    "wires": [
+      [
+        "8e84fda8295946fc"
+      ]
+    ]
+  },
+  {
+    "id": "b19a9e516a43b133",
+    "type": "function",
+    "z": "data.tab",
+    "name": "event handler",
+    "func": "const ev={ts:(msg.payload&&msg.payload.ts)||new Date().toISOString(),topic:msg.topic||'',payload:msg.payload};const h=flow.get('event_history')||[];h.push(ev);while(h.length>25000)h.shift();flow.set('event_history',h);flow.set('event_count_total',(flow.get('event_count_total')||0)+1);flow.set('event_last_ts',ev.ts);const d=new Date(Date.now()+10*3600*1000).toISOString().slice(0,10);msg.filename='/data/home/nodered/bsf-archive/events-'+d+'.jsonl';msg.payload=JSON.stringify(ev)+'\\n';return msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 540,
+    "y": 100,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ab823bd8c18812d7",
+    "type": "file",
+    "z": "data.tab",
+    "name": "events archive (append)",
+    "filename": "",
+    "filenameType": "msg",
+    "appendNewline": false,
+    "createDir": true,
+    "overwriteFile": "false",
+    "encoding": "utf8",
+    "x": 800,
+    "y": 100,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ff28de21a53a16d9",
+    "type": "function",
+    "z": "data.tab",
+    "name": "daily handler",
+    "func": "const ev={ts:(msg.payload&&msg.payload.ts)||new Date().toISOString(),topic:msg.topic||'',payload:msg.payload};const h=flow.get('daily_history')||[];h.push(ev);while(h.length>365)h.shift();flow.set('daily_history',h);flow.set('daily_last_ts',ev.ts);const d=new Date(Date.now()+10*3600*1000).toISOString().slice(0,10);msg.filename='/data/home/nodered/bsf-archive/daily-'+d+'.jsonl';msg.payload=JSON.stringify(ev)+'\\n';return msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 540,
+    "y": 200,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "1313a8bd231e367c",
+    "type": "file",
+    "z": "data.tab",
+    "name": "daily archive (append)",
+    "filename": "",
+    "filenameType": "msg",
+    "appendNewline": false,
+    "createDir": true,
+    "overwriteFile": "false",
+    "encoding": "utf8",
+    "x": 800,
+    "y": 200,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "8e84fda8295946fc",
+    "type": "function",
+    "z": "data.tab",
+    "name": "snapshot builder",
+    "func": "const now=Date.now();const hw=flow.get('hw_latest');const ac=flow.get('ac_latest');const hwTs=flow.get('hw_latest_ts')||0;const acTs=flow.get('ac_latest_ts')||0;const snap={ts:new Date(now).toISOString(),ts_aest:new Date(now+10*3600*1000).toISOString().slice(0,19).replace('T',' ')+' AEST',hw:hw||null,ac:ac||null,hw_age_s:hwTs?Math.round((now-hwTs)/1000):null,ac_age_s:acTs?Math.round((now-acTs)/1000):null};const r30=flow.get('snapshot_history_30s')||[];r30.push(snap);while(r30.length>5760)r30.shift();flow.set('snapshot_history_30s',r30);const tc=(flow.get('tick_count')||0)+1;flow.set('tick_count',tc);if(tc%10===0){const r5=flow.get('snapshot_history_5min')||[];r5.push(snap);while(r5.length>8640)r5.shift();flow.set('snapshot_history_5min',r5);}flow.set('snapshot_last',snap);const fileMsg={filename:'/data/home/nodered/bsf-archive/state-latest.json',payload:JSON.stringify(snap,null,2)};const mqttMsg={topic:'bsf/_obs/snapshot-retained',payload:snap,retain:true};return [fileMsg,mqttMsg];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 540,
+    "y": 300,
+    "wires": [
+      [],
+      []
+    ]
+  },
+  {
+    "id": "c51564e65174b65d",
+    "type": "file",
+    "z": "data.tab",
+    "name": "state-latest.json overwrite",
+    "filename": "",
+    "filenameType": "msg",
+    "appendNewline": false,
+    "createDir": true,
+    "overwriteFile": "true",
+    "encoding": "utf8",
+    "x": 800,
+    "y": 280,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "281f85abbc9fa7f8",
+    "type": "mqtt out",
+    "z": "data.tab",
+    "name": "\u2192 bsf/_obs/snapshot-retained",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "broker": "hwv3.broker",
+    "x": 850,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "e161c5d9c426d514",
+    "type": "mqtt in",
+    "z": "data.tab",
+    "name": "\u2190 bsf/_obs/snapshot-retained",
+    "topic": "bsf/_obs/snapshot-retained",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "hwv3.broker",
+    "inputs": 0,
+    "x": 230,
+    "y": 380,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ad371597b83fd7c4",
+    "type": "function",
+    "z": "data.tab",
+    "name": "snapshot warm-start seeder",
+    "func": "if(!flow.get('snapshot_last')&&msg.payload){flow.set('snapshot_last',msg.payload);flow.set('warm_started_from_retained',new Date().toISOString());}return null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 540,
+    "y": 380,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "112adfdfb3fc5515",
+    "type": "http in",
+    "z": "data.tab",
+    "name": "GET /api/bsf/state-latest",
+    "url": "/api/bsf/state-latest",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 500,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "4984d7cc60a5022e",
+    "type": "function",
+    "z": "data.tab",
+    "name": "build state-latest",
+    "func": "const snap=flow.get('snapshot_last')||null;msg.headers={'Content-Type':'application/json'};msg.payload={ok:true,ts:new Date().toISOString(),snapshot:snap,hw_latest:flow.get('hw_latest')||null,hw_latest_ts:flow.get('hw_latest_ts')||null,ac_latest:flow.get('ac_latest')||null,ac_latest_ts:flow.get('ac_latest_ts')||null};return msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 500,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "63bd1a6fa42796b8",
+    "type": "http response",
+    "z": "data.tab",
+    "name": "200 JSON",
+    "statusCode": "",
+    "headers": {},
+    "x": 780,
+    "y": 500,
+    "wires": []
+  },
+  {
+    "id": "763fc82b828256cb",
+    "type": "http in",
+    "z": "data.tab",
+    "name": "GET /api/bsf/events",
+    "url": "/api/bsf/events",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 560,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "0483c3b1200ea12d",
+    "type": "function",
+    "z": "data.tab",
+    "name": "build events",
+    "func": "const q=msg.req.query||{};const limit=Math.min(parseInt(q.limit)||100,5000);const since=q.since?Date.parse(q.since):0;const topic=q.topic||null;let h=flow.get('event_history')||[];let out=h;if(since)out=out.filter(e=>Date.parse(e.ts)>=since);if(topic)out=out.filter(e=>e.topic===topic||e.topic.startsWith(topic));out=out.slice(-limit);msg.headers={'Content-Type':'application/json'};msg.payload={ok:true,ts:new Date().toISOString(),count:out.length,total_in_buffer:h.length,events:out};return msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 560,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "54bc61b137bfe843",
+    "type": "http response",
+    "z": "data.tab",
+    "name": "200 JSON",
+    "statusCode": "",
+    "headers": {},
+    "x": 780,
+    "y": 560,
+    "wires": []
+  },
+  {
+    "id": "21b43b56c94bf7e0",
+    "type": "http in",
+    "z": "data.tab",
+    "name": "GET /api/bsf/daily",
+    "url": "/api/bsf/daily",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 620,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "92f6849d11149ca7",
+    "type": "function",
+    "z": "data.tab",
+    "name": "build daily",
+    "func": "const q=msg.req.query||{};const days=Math.min(parseInt(q.days)||30,365);const h=flow.get('daily_history')||[];const out=h.slice(-days);msg.headers={'Content-Type':'application/json'};msg.payload={ok:true,ts:new Date().toISOString(),count:out.length,total_in_buffer:h.length,daily:out};return msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 620,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "cb08a55110cb2b93",
+    "type": "http response",
+    "z": "data.tab",
+    "name": "200 JSON",
+    "statusCode": "",
+    "headers": {},
+    "x": 780,
+    "y": 620,
+    "wires": []
+  },
+  {
+    "id": "6ae398957f09f25b",
+    "type": "http in",
+    "z": "data.tab",
+    "name": "GET /api/bsf/health",
+    "url": "/api/bsf/health",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 680,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "05907c415a61c2a6",
+    "type": "function",
+    "z": "data.tab",
+    "name": "build health",
+    "func": "const now=Date.now();const hwLatestTs=flow.get('hw_latest_ts')||0;const acLatestTs=flow.get('ac_latest_ts')||0;const evHist=flow.get('event_history')||[];const dHist=flow.get('daily_history')||[];const s30=flow.get('snapshot_history_30s')||[];const s5=flow.get('snapshot_history_5min')||[];msg.headers={'Content-Type':'application/json'};msg.payload={ok:true,ts:new Date().toISOString(),buffers:{snapshot_30s:{count:s30.length,cap:5760,oldest:s30[0]&&s30[0].ts,newest:s30[s30.length-1]&&s30[s30.length-1].ts},snapshot_5min:{count:s5.length,cap:8640,oldest:s5[0]&&s5[0].ts,newest:s5[s5.length-1]&&s5[s5.length-1].ts},events:{count:evHist.length,cap:25000,total_seen:flow.get('event_count_total')||0,last_ts:flow.get('event_last_ts')||null},daily:{count:dHist.length,cap:365,last_ts:flow.get('daily_last_ts')||null}},telemetry_freshness:{hw_latest_age_s:hwLatestTs?Math.round((now-hwLatestTs)/1000):null,ac_latest_age_s:acLatestTs?Math.round((now-acLatestTs)/1000):null},warm_started_from_retained:flow.get('warm_started_from_retained')||null};return msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 500,
+    "y": 680,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "0e137d4a4c270ac2",
+    "type": "http response",
+    "z": "data.tab",
+    "name": "200 JSON",
+    "statusCode": "",
+    "headers": {},
+    "x": 780,
+    "y": 680,
+    "wires": []
+  },
+  {
+    "id": "acv15.in.hw",
+    "type": "mqtt in",
+    "z": "acv15.tab",
+    "name": "hw_status",
+    "topic": "bsf/hotwater/status",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "acv15.ch.hw"
+      ]
+    ]
+  },
+  {
+    "id": "acv15.ch.hw",
+    "type": "change",
+    "z": "acv15.tab",
+    "name": "topic=hw_status",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "hw_status",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 380,
+    "y": 100,
+    "wires": [
+      [
+        "acv15.fn.disp"
+      ]
+    ]
+  },
+  {
+    "id": "acv15.inj.tick",
+    "type": "inject",
+    "z": "acv15.tab",
+    "name": "30s tick",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "10",
+    "topic": "tick",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 180,
+    "wires": [
+      [
+        "acv15.fn.disp"
+      ]
+    ]
+  },
+  {
+    "id": "acv15.inj.lockout",
+    "type": "inject",
+    "z": "acv15.tab",
+    "name": "5min lockout",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "*/5 * * * *",
+    "once": true,
+    "onceDelay": "60",
+    "topic": "lockout_tick",
+    "payload": "",
+    "payloadType": "date",
+    "x": 160,
+    "y": 240,
+    "wires": [
+      [
+        "acv15.fn.disp"
+      ]
+    ]
+  },
+  {
+    "id": "acv15.fn.disp",
+    "type": "function",
+    "z": "acv15.tab",
+    "name": "ac_dispatcher_v15",
+    "func": "// AC v1.10 \u2014 v1.9 + inside-temp gate (winter heating) (2026-06-05 Steven, v1.10)\n// AC v1.11 \u2014 presence-aware AUTO/ON/OFF mode switch (2026-06-17 Steven)\n//\n// v1.8 fix: use plug_power > 100 W as the \"HW is drawing\" signal instead of the\n// non-existent p.plug_state. HW dispatcher status publishes hwState (commanded)\n// and plug_power (actual draw) but not plug_state. Using plug_power also handles\n// the \"cylinder hot, thermostat open\" case correctly \u2014 no drawing = AC can run.\n//\n// Windows (local AEST):\n//   W1: sunrise - 2 h  ->  08:00            ON SOC >= 80   OFF SOC < 75   (pre-heat; HW unlikely to fire this early)\n//   W2: 08:00          ->  13:00             ON SOC >= 90   OFF SOC < 85   AND HW must not be drawing\n//   W3: 13:00          ->  sunset - 2 h     ON SOC >= 99   OFF SOC < 98   AND HW must not be drawing\n// Outside any window: OFF (5-min force-OFF loop keeps it OFF).\n//\n// Cascade safety:\n//   If ac_load > AC_SAFETY_W (4200 W) AND HW is NOT drawing AND AC is ON,\n//   AC dispatcher trips itself off. (HW dispatcher handles the same threshold first;\n//   when HW dispatcher kills HW, plug_power drops to 0 and AC sees hwDrawing = false\n//   on its next tick.)\n//\n// v1.11 (2026-06-17 Steven): AUTO / ON / OFF mode switch + LAN presence gate.\n//   ac_mode (flow context, default 'AUTO'):\n//     'OFF'  \u2014 HARD OVERRIDE. Force the plug OFF every tick; beats window, temp,\n//              SOC, presence and manual ON. The most restrictive mode.\n//     'ON'   \u2014 run the EXACT existing surplus-solar logic (window / SOC / temp /\n//              cascade-safety), but presence-INDEPENDENT. \"Heat when it's cold and\n//              there's solar, whether or not the detector sees a phone.\"\n//     'AUTO' \u2014 the same surplus-solar logic, additionally GATED on anyone_home:\n//              heat only when someone is home. Nobody home -> force OFF.\n//   anyone_home arrives on bsf/presence/state from the farm-iMac LAN presence\n//   detector (bsf_presence.py). Presence is a COMFORT gate layered ON TOP of the\n//   surplus-solar safety envelope \u2014 it NEVER bypasses SOC / window / lockout /\n//   cascade-safety. A dead presence feed (no update for > PRESENCE_STALE_MS) fails\n//   OPEN in AUTO (so a detector outage cannot strand the house cold); this is\n//   surfaced as presence_known:false on the status. The detector already applies a\n//   5-min \"away\" grace, so anyone_home will not flap on WiFi sleep/roam.\n//   See dossiers/ac_presence_gate_2026-06-17.md\n//\n// Inputs:\n//   msg.topic === 'tick'             \u2014 30s tick from inject. State eval.\n//   msg.topic === 'hw_status'        \u2014 HW dispatcher status payload (hwState, plug_power, soc, ac_load, sunrise/sunset).\n//   msg.topic === 'lockout_tick'     \u2014 5-min force-OFF outside any window.\n//   msg.topic === 'inside_temp'      \u2014 Tuya cloud inside-temperature reading.\n//   msg.topic === 'bsf/ac/cmd'       \u2014 dashboard command: set_thresholds | set_mode.\n//   msg.topic === 'bsf/presence/state' \u2014 LAN presence detector (anyone_home).\n//\n// Outputs (4):\n//   [0] plug command   [1] bsf/ac/log   [2] bsf/ac/status   [3] bsf/ac/anomaly\n\nconst W1_PRE_SUNRISE_OFFSET_MS = 2 * 60 * 60 * 1000;  // start 2 h before sunrise\nconst W1_END_H = 8.0;\nconst W2_END_H = 13.0;\nconst DISPATCH_END_OFFSET_MS = 2 * 60 * 60 * 1000;    // end W3 2 h before sunset\n\nconst W1_ON_PCT = __AC_W1_SOC_ON__, W1_OFF_PCT = __AC_W1_SOC_OFF__;\nconst W2_ON_PCT = __AC_W2_SOC_ON__, W2_OFF_PCT = __AC_W2_SOC_OFF__;\nconst W3_ON_PCT = __AC_W3_SOC_ON__, W3_OFF_PCT = __AC_W3_SOC_OFF__;\n\nconst SUSTAIN_ON_MS  = __AC_SUSTAIN_ON_MS__;\nconst SUSTAIN_OFF_MS = __AC_SUSTAIN_OFF_MS__;\n\nconst AC_SAFETY_W = __DISP_SAFETY_CAP_W__;             // cascade trip \u2014 fires only if HW is not currently drawing\nconst HW_DRAWING_THRESHOLD_W = 100;\n\n// v1.10 (2026-06-05 Steven): inside-temperature gate (winter heating)\n// v1.10.2 (2026-06-17 Steven): inside-temp thresholds promoted to FLOW CONTEXT so\n// they can be tuned live from the dashboard (bsf/ac/cmd) with NO redeploy. Defaults\n// preserve the v1.10 winter-heating values. See\n// dossiers/ac_threshold_controls_2026-06-16.md\nconst INSIDE_TEMP_ON_DEFAULT  = __AC_INSIDE_ON_DEFAULT__;   // start heating when inside < this (degC)\nconst INSIDE_TEMP_OFF_DEFAULT = __AC_INSIDE_OFF_DEFAULT__;   // stop  heating when inside >= this (degC)\nconst INSIDE_TEMP_ON_MIN  = 16, INSIDE_TEMP_ON_MAX  = 26;   // sane heating-ON range\nconst INSIDE_TEMP_OFF_MIN = 18, INSIDE_TEMP_OFF_MAX = 28;   // sane heating-OFF range\nconst INSIDE_TEMP_MIN_GAP = 1.0;      // heating hysteresis: OFF must be >= ON + gap\nconst INSIDE_TEMP_STALE_MS = 10 * 60 * 1000;   // inside-temp feed older than this = unusable\n\n// v1.11 (2026-06-17 Steven): presence feed freshness. Detector publishes every ~45s;\n// no update for this long = feed dead -> AUTO fails OPEN (treat as someone home).\nconst PRESENCE_STALE_MS = 8 * 60 * 1000;\n\nfunction clampStep(v, lo, hi){ v = Math.round(v * 2) / 2; if (v < lo) v = lo; if (v > hi) v = hi; return v; }\nfunction getThresholds(){\n    var on  = flow.get('ac_inside_temp_on_c');\n    var off = flow.get('ac_inside_temp_off_c');\n    if (typeof on  !== 'number' || !isFinite(on))  on  = INSIDE_TEMP_ON_DEFAULT;\n    if (typeof off !== 'number' || !isFinite(off)) off = INSIDE_TEMP_OFF_DEFAULT;\n    return { on: on, off: off };\n}\nfunction getMode(){\n    var m = flow.get('ac_mode');\n    if (m === 'AUTO' || m === 'ON' || m === 'OFF') return m;\n    return 'AUTO';\n}\n\nfunction iso() { return new Date().toISOString(); }\nfunction nowMs() { return Date.now(); }\nfunction plugCmd(on) { return { payload: { dps: '1', set: !!on } }; }\nfunction logPayload(event, extra) {\n    return { topic: 'bsf/ac/log', payload: Object.assign({ ts: iso(), event: event }, extra || {}) };\n}\nfunction statusPayload(extra) {\n    return { topic: 'bsf/ac/status', payload: Object.assign({ ts: iso() }, extra || {}) };\n}\nfunction anomalyPayload(reason, extra) {\n    return { topic: 'bsf/ac/anomaly', payload: Object.assign({ ts: iso(), reason: reason, source: 'ac_dispatcher_v18' }, extra || {}) };\n}\n\n// hw_status pipe: cache soc, hw drawing flag, ac_load, sunrise/sunset on flow context.\nif (msg.topic === 'inside_temp' || msg.topic === 'bsf/ac/inside_temp') {\n    var rawT = msg.payload;\n    var valT;\n    if (typeof rawT === 'number') { valT = rawT; }\n    else if (rawT && typeof rawT === 'object' && typeof rawT.value === 'number') { valT = rawT.value; }\n    else if (typeof rawT === 'string') { valT = parseFloat(rawT); }\n    if (typeof valT === 'number' && isFinite(valT)) {\n        flow.set('ac_inside_temp', valT);\n        flow.set('ac_inside_temp_ts', Date.now());\n    }\n    return null;\n}\n\n// v1.11 (2026-06-17 Steven): LAN presence feed. Cache anyone_home + a heartbeat ts\n// so the tick path can gate AUTO heating and detect a dead detector. Read-only: this\n// only OBSERVES presence; it never affects PV / surplus / load math.\nif (msg.topic === 'bsf/presence/state' || msg.topic === 'presence_state') {\n    var pr = msg.payload;\n    if (typeof pr === 'string') { try { pr = JSON.parse(pr); } catch (e) { pr = null; } }\n    if (pr && typeof pr === 'object' && typeof pr.anyone_home === 'boolean') {\n        flow.set('ac_anyone_home', pr.anyone_home);\n        // configured = at least one phone registered. Unconfigured -> AUTO fails OPEN\n        // (no roster must never brick heating). Absent field defaults to configured.\n        flow.set('ac_presence_configured', pr.configured !== false);\n        flow.set('ac_presence_ts', Date.now());\n    }\n    return null;\n}\n\n// v1.10.2 (2026-06-17 Steven): live control from the dashboard. Arrives on bsf/ac/cmd\n// over MQTT (the LAN dashboard publishes over MQTT-over-WS). Validated SERVER-SIDE;\n// never trusts the client. Writes flow context that the next tick reads; no redeploy.\n//   action: 'set_thresholds'  -> inside-temp ON/OFF setpoints (range clamp + 0.5C snap + hysteresis)\n//   action: 'set_mode'        -> AUTO | ON | OFF  (v1.11)\nif (msg.topic === 'bsf/ac/cmd' || msg.topic === 'set_thresholds' || msg.topic === 'set_mode') {\n    var body = msg.payload;\n    if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }\n    if (!body || typeof body !== 'object') {\n        return [ null, logPayload('cmd_ignored', { reason: 'bad_payload' }), null, null ];\n    }\n\n    // ---- v1.11: AUTO/ON/OFF mode switch ----\n    if (body.action === 'set_mode') {\n        var m = (typeof body.mode === 'string') ? body.mode.toUpperCase() : '';\n        if (m !== 'AUTO' && m !== 'ON' && m !== 'OFF') {\n            return [ null, logPayload('cmd_ignored', { reason: 'bad_mode', mode: body.mode }), null, null ];\n        }\n        var srcM = (typeof body.source === 'string') ? body.source.slice(0, 40) : 'dashboard';\n        flow.set('ac_mode', m);\n        flow.set('ac_mode_changed_ts', Date.now());\n        flow.set('ac_mode_changed_src', srcM);\n        flow.set('ac_mode_off_sent', false);       // re-arm the OFF-guard log latch\n        flow.set('ac_presence_off_sent', false);    // re-arm the presence-guard log latch\n        if (m === 'OFF') {\n            // hard override takes effect immediately \u2014 don't wait for the next tick.\n            context.set('acState', 'off'); context.set('onSince', null); context.set('offSince', null);\n            flow.set('ac_mode_off_sent', true);\n            return [ plugCmd(false), logPayload('mode_set', { mode: m, source: srcM, action_taken: 'force_off' }), null, null ];\n        }\n        return [ null, logPayload('mode_set', { mode: m, source: srcM }), null, null ];\n    }\n\n    // ---- set_thresholds (v1.10.2) ----\n    if (body.action !== 'set_thresholds') {\n        return [ null, logPayload('cmd_ignored', { reason: 'unknown_action', action: body.action }), null, null ];\n    }\n    var cur0 = getThresholds();\n    var reqOn  = Number(body.on_c),  reqOff = Number(body.off_c);\n    if (!isFinite(reqOn))  reqOn  = cur0.on;\n    if (!isFinite(reqOff)) reqOff = cur0.off;\n    var on  = clampStep(reqOn,  INSIDE_TEMP_ON_MIN,  INSIDE_TEMP_ON_MAX);\n    var off = clampStep(reqOff, INSIDE_TEMP_OFF_MIN, INSIDE_TEMP_OFF_MAX);\n    // heating hysteresis: OFF >= ON + gap. Lift OFF first; if it caps out, drop ON.\n    if (off < on + INSIDE_TEMP_MIN_GAP) {\n        off = clampStep(on + INSIDE_TEMP_MIN_GAP, INSIDE_TEMP_OFF_MIN, INSIDE_TEMP_OFF_MAX);\n        if (off < on + INSIDE_TEMP_MIN_GAP) {\n            on = clampStep(off - INSIDE_TEMP_MIN_GAP, INSIDE_TEMP_ON_MIN, INSIDE_TEMP_ON_MAX);\n        }\n    }\n    var changedTs = Date.now();\n    var src = (typeof body.source === 'string') ? body.source.slice(0, 40) : 'dashboard';\n    flow.set('ac_inside_temp_on_c', on);\n    flow.set('ac_inside_temp_off_c', off);\n    flow.set('ac_thresholds_changed_ts', changedTs);\n    flow.set('ac_thresholds_changed_src', src);\n    flow.set('ac_temp_off_sent', false);   // re-arm the temp-off log latch for the new band\n    return [ null,\n        logPayload('thresholds_set', { on_c: on, off_c: off, req_on: body.on_c, req_off: body.off_c, source: src }),\n        null, null ];\n}\n\nif (msg.topic === 'hw_status') {\n    var p = msg.payload || {};\n    if (typeof p.soc === 'number') flow.set('ac_soc', p.soc);\n    // HW is \"drawing\" if plug_power is meaningfully above zero (element active).\n    if (typeof p.plug_power === 'number') {\n        flow.set('ac_hw_drawing', p.plug_power > HW_DRAWING_THRESHOLD_W);\n        flow.set('ac_hw_plug_power', p.plug_power);\n    }\n    // Also cache dispatcher's commanded hwState as a fallback signal.\n    if (typeof p.hwState === 'string') flow.set('ac_hw_state', p.hwState);\n    if (typeof p.ac_load === 'number') flow.set('ac_ac_load', p.ac_load);\n    if (p.sunrise_iso) flow.set('ac_sunrise_iso', p.sunrise_iso);\n    if (p.sunset_iso)  flow.set('ac_sunset_iso',  p.sunset_iso);\n    return null;\n}\n\n// 5-min force-OFF outside any window (also force-OFF whenever ac_mode === 'OFF').\nif (msg.topic === 'lockout_tick') {\n    var winNow = flow.get('ac_window') || 'LOCKOUT';\n    var modeNow = getMode();\n    if (winNow === 'LOCKOUT' || modeNow === 'OFF') {\n        return [ plugCmd(false), logPayload('lockout_force_off', { window: winNow, mode: modeNow }), null, null ];\n    }\n    return null;\n}\n\nif (msg.topic !== 'tick') return null;\n\nvar t = nowMs();\nvar d = new Date();\nvar hourFrac = d.getHours() + d.getMinutes()/60;\n\nvar soc        = flow.get('ac_soc');\n// hwDrawing = HW element is actively pulling power, OR dispatcher commanded ON (belt + braces).\nvar hwDrawing  = !!flow.get('ac_hw_drawing') || (flow.get('ac_hw_state') === 'on');\nvar hwPlugPower= flow.get('ac_hw_plug_power');\nvar acLoad     = flow.get('ac_ac_load');\nvar insideTemp = flow.get('ac_inside_temp');\nvar insideTempTs = flow.get('ac_inside_temp_ts') || 0;\nvar insideTempStale = (Date.now() - insideTempTs) > INSIDE_TEMP_STALE_MS;\nvar insideTempUsable = typeof insideTemp === 'number' && isFinite(insideTemp) && !insideTempStale;\nvar _th = getThresholds();\nvar INSIDE_TEMP_ON_C = _th.on, INSIDE_TEMP_OFF_C = _th.off;\n\n// v1.11: mode + presence\nvar acMode      = getMode();\nvar anyoneHome  = !!flow.get('ac_anyone_home');\nvar presenceTs  = flow.get('ac_presence_ts') || 0;\nvar presenceConfigured = flow.get('ac_presence_configured') !== false;   // unconfigured roster -> fail open\nvar presenceFresh = presenceTs > 0 && (Date.now() - presenceTs) <= PRESENCE_STALE_MS;\nvar presenceKnown = presenceFresh && presenceConfigured;\n\nvar sunsetISO  = flow.get('ac_sunset_iso');\nvar sunriseISO = flow.get('ac_sunrise_iso');\nvar sunset  = sunsetISO  ? Date.parse(sunsetISO)  : null;\nvar sunrise = sunriseISO ? Date.parse(sunriseISO) : null;\nif (!sunset  || isNaN(sunset))  sunset  = new Date(d.getFullYear(),d.getMonth(),d.getDate(),17,30,0).getTime();\nif (!sunrise || isNaN(sunrise)) sunrise = new Date(d.getFullYear(),d.getMonth(),d.getDate(), 6, 0,0).getTime();\nvar dispatchEnd  = sunset  - DISPATCH_END_OFFSET_MS;\nvar preHeatStart = sunrise - W1_PRE_SUNRISE_OFFSET_MS;\n\nvar windowName = 'LOCKOUT', onPct = null, offPct = null, requireHwOff = false;\nif (t >= preHeatStart && hourFrac < W1_END_H) {\n    windowName = 'W1_PRE_8'; onPct = W1_ON_PCT; offPct = W1_OFF_PCT;\n} else if (hourFrac >= W1_END_H && hourFrac < W2_END_H) {\n    windowName = 'W2_8_TO_13'; onPct = W2_ON_PCT; offPct = W2_OFF_PCT; requireHwOff = true;\n} else if (hourFrac >= W2_END_H && t < dispatchEnd) {\n    windowName = 'W3_13_TO_SUNSET_M2H'; onPct = W3_ON_PCT; offPct = W3_OFF_PCT; requireHwOff = true;\n}\nflow.set('ac_window', windowName);\n\nvar acState  = context.get('acState')  || 'off';\nvar onSince  = context.get('onSince')  || null;\nvar offSince = context.get('offSince') || null;\n\nvar statusMsg = statusPayload({\n    window: windowName, acState: acState, soc: soc,\n    hw_drawing: hwDrawing, hw_plug_power: hwPlugPower, ac_load: acLoad,\n    on_pct: onPct, off_pct: offPct, require_hw_off: requireHwOff,\n    inside_temp_on_c: INSIDE_TEMP_ON_C, inside_temp_off_c: INSIDE_TEMP_OFF_C,\n    thresholds_changed_ts: flow.get('ac_thresholds_changed_ts') || null,\n    thresholds_changed_src: flow.get('ac_thresholds_changed_src') || null,\n    // v1.11 mode + presence\n    ac_mode: acMode,\n    anyone_home: anyoneHome,\n    presence_known: presenceKnown,\n    presence_configured: presenceConfigured && presenceFresh,\n    presence_ts: presenceTs || null,\n    mode_changed_ts: flow.get('ac_mode_changed_ts') || null,\n    mode_changed_src: flow.get('ac_mode_changed_src') || null,\n    dispatch_end_iso: new Date(dispatchEnd).toISOString(),\n    preheat_start_iso: new Date(preHeatStart).toISOString()\n});\n\n// v1.11: ac_mode === 'OFF' \u2014 HARD OVERRIDE. Force the plug OFF every tick. Beats\n// window, temp, SOC, presence and any manual ON. Highest priority gate.\nif (acMode === 'OFF') {\n    var wasOnOff = (acState === 'on');\n    context.set('acState','off'); context.set('onSince', null); context.set('offSince', null);\n    var offSent = flow.get('ac_mode_off_sent');\n    flow.set('ac_mode_off_sent', true);\n    if (!offSent || wasOnOff) {\n        return [ plugCmd(false), logPayload(wasOnOff ? 'OFF' : 'OFF_mode_guard', { reason: 'ac_mode_off', was_on: wasOnOff, window: windowName }), statusMsg, null ];\n    }\n    return [ plugCmd(false), null, statusMsg, null ];\n}\nflow.set('ac_mode_off_sent', false);   // not in OFF mode \u2014 re-arm the latch\n\nif (windowName === 'LOCKOUT') {\n    if (acState === 'on') {\n        context.set('acState','off'); context.set('onSince', null); context.set('offSince', null);\n        return [ plugCmd(false), logPayload('OFF', { reason: 'LOCKOUT' }), statusMsg, null ];\n    }\n    return [ null, null, statusMsg, null ];\n}\n\n// Cascade safety trip: AC load is still too high AND HW is NOT drawing \u2014 kill AC.\n// (If HW is still drawing, HW dispatcher will handle the safety cap; we wait.)\nif (typeof acLoad === 'number' && acLoad > AC_SAFETY_W && !hwDrawing && acState === 'on') {\n    context.set('acState','off'); context.set('onSince', null); context.set('offSince', null);\n    var anomalyMsg = anomalyPayload('ac_load_above_safety_cap_hw_not_drawing', { ac_load: Math.round(acLoad), cap: AC_SAFETY_W, hw_plug_power: hwPlugPower });\n    return [ plugCmd(false), logPayload('OFF', { reason: 'cascade_safety', ac_load: Math.round(acLoad), cap: AC_SAFETY_W, hw_plug_power: hwPlugPower, window: windowName }), statusMsg, anomalyMsg ];\n}\n\n// v1.10.1 (2026-06-05 Steven, option A): inside-temp OFF gate fires regardless of\n// internal acState \u2014 guarantees a manual plug-ON gets corrected on the next tick.\n// To avoid log spam every tick while warm, the log/anomaly only fires on the first\n// tick of each warm cycle (tracked via flow flag ac_temp_off_sent).\nif (insideTempUsable && insideTemp >= INSIDE_TEMP_OFF_C) {\n    var wasOn = (acState === 'on');\n    context.set('acState','off'); context.set('onSince', null); context.set('offSince', null);\n    var alreadySent = flow.get('ac_temp_off_sent');\n    flow.set('ac_temp_off_sent', true);\n    if (!alreadySent || wasOn) {\n        var logEv = wasOn ? 'OFF' : 'OFF_temp_guard';\n        return [ plugCmd(false), logPayload(logEv, { reason: 'inside_temp_at_or_above_off_c', inside_temp: insideTemp, off_c: INSIDE_TEMP_OFF_C, was_on: wasOn, window: windowName }), statusMsg, null ];\n    }\n    // Subsequent ticks while still warm: silent OFF command (idempotent on Tuya plug).\n    return [ plugCmd(false), null, statusMsg, null ];\n} else if (insideTempUsable && insideTemp < INSIDE_TEMP_OFF_C) {\n    flow.set('ac_temp_off_sent', false);\n}\n\n// v1.11: AUTO presence gate \u2014 nobody home forces OFF (the detector's 5-min grace has\n// already elapsed before anyone_home goes false). Fails OPEN when the presence feed is\n// stale (presenceKnown=false) so a detector outage can't strand the house cold. ON and\n// OFF modes skip this entirely (OFF already returned above; ON ignores presence).\nif (acMode === 'AUTO' && presenceKnown && !anyoneHome) {\n    var wasOnPr = (acState === 'on');\n    context.set('acState','off'); context.set('onSince', null); context.set('offSince', null);\n    var prSent = flow.get('ac_presence_off_sent');\n    flow.set('ac_presence_off_sent', true);\n    if (!prSent || wasOnPr) {\n        return [ plugCmd(false), logPayload(wasOnPr ? 'OFF' : 'OFF_presence_guard', { reason: 'nobody_home_auto', was_on: wasOnPr, window: windowName }), statusMsg, null ];\n    }\n    return [ plugCmd(false), null, statusMsg, null ];\n}\nflow.set('ac_presence_off_sent', false);   // home / ON / unknown \u2014 re-arm the latch\n\n// v1.9 (2026-06-04 Steven): HW-exclusive priority removed. AC and HW can co-exist\n// as long as combined load stays under AC_CAP_W / AC_SAFETY_W. HW dispatcher's own\n// ac_load > 4200W trip catches overload first; v1.8 cascade safety below is the\n// final guard. With 13.5 kW of panels, running both ~3.4 kW of devices is comfortable.\n\nif (typeof soc !== 'number') {\n    return [ null, null, statusMsg, null ];\n}\n\nif (acState === 'off') {\n    var tempOk = insideTempUsable && insideTemp < INSIDE_TEMP_ON_C;   // v1.10\n    // v1.11: AUTO requires someone home; ON ignores presence; a stale feed fails open.\n    var presenceOk = (acMode === 'ON') || !presenceKnown || anyoneHome;\n    var canOn = (soc >= onPct) && !(typeof acLoad === 'number' && acLoad > AC_SAFETY_W) && tempOk && presenceOk;\n    if (canOn) {\n        if (!onSince) { onSince = t; context.set('onSince', t); }\n        if ((t - onSince) >= SUSTAIN_ON_MS) {\n            context.set('acState','on'); context.set('onSince', null); context.set('offSince', null);\n            return [ plugCmd(true), logPayload('ON', { window: windowName, soc: soc, on_pct: onPct, mode: acMode }), statusMsg, null ];\n        }\n    } else {\n        context.set('onSince', null);\n    }\n    return [ null, null, statusMsg, null ];\n} else {\n    if (soc < offPct) {\n        if (!offSince) { offSince = t; context.set('offSince', t); }\n        if ((t - offSince) >= SUSTAIN_OFF_MS) {\n            context.set('acState','off'); context.set('onSince', null); context.set('offSince', null);\n            return [ plugCmd(false), logPayload('OFF', { window: windowName, soc: soc, off_pct: offPct }), statusMsg, null ];\n        }\n    } else {\n        context.set('offSince', null);\n    }\n    return [ null, null, statusMsg, null ];\n}\n",
+    "outputs": 4,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 620,
+    "y": 180,
+    "wires": [
+      [
+        "6ed7e9e95e1e37ad",
+        "8e5ea7b4b5f5227a"
+      ],
+      [
+        "acv15.out.log"
+      ],
+      [
+        "acv15.out.status"
+      ],
+      [
+        "acv15.out.anomaly"
+      ]
+    ]
+  },
+  {
+    "id": "acv15.out.log",
+    "type": "mqtt out",
+    "z": "acv15.tab",
+    "name": "\u2192 bsf/ac/log",
+    "topic": "bsf/ac/log",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 920,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "acv15.out.status",
+    "type": "mqtt out",
+    "z": "acv15.tab",
+    "name": "\u2192 bsf/ac/status",
+    "topic": "bsf/ac/status",
+    "qos": "0",
+    "retain": "true",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 920,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "acv15.out.anomaly",
+    "type": "mqtt out",
+    "z": "acv15.tab",
+    "name": "\u2192 bsf/ac/anomaly",
+    "topic": "bsf/ac/anomaly",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "hwv3.broker",
+    "x": 920,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "6ed7e9e95e1e37ad",
+    "type": "link out",
+    "z": "acv15.tab",
+    "name": "acv15.link.plugCmd",
+    "mode": "link",
+    "links": [
+      "fa8d333daaae4c24"
+    ],
+    "x": 840,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "8e5ea7b4b5f5227a",
+    "type": "debug",
+    "z": "acv15.tab",
+    "name": "SPY: dispatcher.out[0]",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 840,
+    "y": 210,
+    "wires": [],
+    "info": "Temporary spy on plug_cmd"
+  },
+  {
+    "id": "8207072e9efca94e",
+    "type": "mqtt in",
+    "z": "acv15.tab",
+    "name": "inside_temp",
+    "topic": "bsf/ac/inside_temp",
+    "qos": "0",
+    "datatype": "auto",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 300,
+    "wires": [
+      [
+        "c2b217b787b8ed89"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.mode_288",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/288",
+    "path": "/MppOperationMode",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/288",
+      "name": "BlueSolar Charger MPPT 150/35 rev2"
+    },
+    "pathObj": {
+      "path": "/MppOperationMode",
+      "name": "MPP operation mode",
+      "type": "enum",
+      "enum": {
+        "0": "Off",
+        "1": "Voltage or current limited",
+        "2": "MPPT Tracker active",
+        "255": "Not available"
+      }
+    },
+    "initial": "",
+    "name": "mode:mode_288",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 1020,
+    "wires": [
+      [
+        "hwv3.c.mode_288"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.c.mode_288",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mode_288",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mode_288",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 340,
+    "y": 1020,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.mode_289",
+    "type": "victron-input-solarcharger",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.solarcharger/289",
+    "path": "/MppOperationMode",
+    "serviceObj": {
+      "service": "com.victronenergy.solarcharger/289",
+      "name": "BlueSolar Charger MPPT 150/35 rev2"
+    },
+    "pathObj": {
+      "path": "/MppOperationMode",
+      "name": "MPP operation mode",
+      "type": "enum",
+      "enum": {
+        "0": "Off",
+        "1": "Voltage or current limited",
+        "2": "MPPT Tracker active",
+        "255": "Not available"
+      }
+    },
+    "initial": "",
+    "name": "mode:mode_289",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 1080,
+    "wires": [
+      [
+        "hwv3.c.mode_289"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.c.mode_289",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mode_289",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mode_289",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 340,
+    "y": 1080,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.mode_rs1",
+    "type": "victron-input-multi",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.multi/0",
+    "path": "/Pv/0/MppOperationMode",
+    "serviceObj": {
+      "service": "com.victronenergy.multi/0",
+      "name": "RS 48/6000/100 HQ241839R64"
+    },
+    "pathObj": {
+      "path": "/Pv/0/MppOperationMode",
+      "name": "MPP operation mode tracker 1",
+      "type": "enum",
+      "enum": {
+        "0": "Off",
+        "1": "Voltage/current limited",
+        "2": "MPPT active",
+        "255": "Not available"
+      }
+    },
+    "initial": "",
+    "name": "mode:mode_rs1",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 1140,
+    "wires": [
+      [
+        "hwv3.c.mode_rs1"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.c.mode_rs1",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mode_rs1",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mode_rs1",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 340,
+    "y": 1140,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.v.mode_rs2",
+    "type": "victron-input-multi",
+    "z": "hwv3.tab",
+    "service": "com.victronenergy.multi/0",
+    "path": "/Pv/1/MppOperationMode",
+    "serviceObj": {
+      "service": "com.victronenergy.multi/0",
+      "name": "RS 48/6000/100 HQ241839R64"
+    },
+    "pathObj": {
+      "path": "/Pv/1/MppOperationMode",
+      "name": "MPP operation mode tracker 2",
+      "type": "enum",
+      "enum": {
+        "0": "Off",
+        "1": "Voltage/current limited",
+        "2": "MPPT active",
+        "255": "Not available"
+      }
+    },
+    "initial": "",
+    "name": "mode:mode_rs2",
+    "onlyChanges": false,
+    "roundValues": false,
+    "rateLimit": "",
+    "conditionalMode": "disabled",
+    "condition1Operator": "_",
+    "condition1Threshold": "",
+    "condition2Enabled": false,
+    "outputTrue": "",
+    "outputFalse": "",
+    "outputOnChange": false,
+    "debounce": "",
+    "x": 100,
+    "y": 1200,
+    "wires": [
+      [
+        "hwv3.c.mode_rs2"
+      ]
+    ]
+  },
+  {
+    "id": "hwv3.c.mode_rs2",
+    "type": "change",
+    "z": "hwv3.tab",
+    "name": "topic=mode_rs2",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "mode_rs2",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 340,
+    "y": 1200,
+    "wires": [
+      [
+        "hwv3.fn.agg"
+      ]
+    ]
+  },
+  {
+    "id": "acv15.in.cmd",
+    "type": "mqtt in",
+    "z": "acv15.tab",
+    "name": "ac_cmd",
+    "topic": "bsf/ac/cmd",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 360,
+    "wires": [
+      [
+        "acv15.fn.disp"
+      ]
+    ]
+  },
+  {
+    "id": "acv15.in.presence",
+    "type": "mqtt in",
+    "z": "acv15.tab",
+    "name": "presence_state",
+    "topic": "bsf/presence/state",
+    "qos": "0",
+    "datatype": "json",
+    "broker": "hwv3.broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 420,
+    "wires": [
+      [
+        "acv15.fn.disp"
+      ]
+    ]
+  }
+]

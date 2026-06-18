@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# BSF Solar Dispatch — keep secrets and generated artifacts OUT of git.
+# The bundle ships with *.example templates only. The installer (deploy.py) and
+# the Tuya wizard write the files below with REAL credentials at runtime — they
+# must never be committed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# The one filled-in system config (holds Tuya access_id/secret + local keys)
+config.json
+
+# Generated, resolved dashboard config (real Cerbo IP, location, Gumroad key)
+dashboard/dashboard-config.js
+
+# deploy.py build output — the flow with every real value stamped in
+.build/
+
+# tinytuya wizard output — per-device local keys
+devices.json
+tinytuya.json
+*.snapshot.json
+
+# Runtime relay state
+state.json
+*.state.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
