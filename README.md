@@ -2,7 +2,7 @@
 
 **A surplus-PV dispatcher for Victron Cerbo + Tuya.**
 
-[![Release](https://img.shields.io/github/v/release/banksiasprings/bsf-solar-dispatch-starter?sort=semver)](https://github.com/banksiasprings/bsf-solar-dispatch-starter/releases/latest)
+[![Release](https://img.shields.io/github/v/release/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter?sort=semver)](https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/latest)
 [![Licence](https://img.shields.io/badge/licence-donate--ware%20%24'2%2B-blue)](LICENSE.md)
 [![Install](https://img.shields.io/badge/install-Claude%20Code%20~15%20min-7c4dff)](#install-via-claude-code-15-min)
 
@@ -19,12 +19,12 @@ load caps, and presence-aware air-con — built and run on a working Queensland 
 
 ## Download
 
-📦 **[Download the latest release ZIP →](https://github.com/banksiasprings/bsf-solar-dispatch-starter/releases/latest)**
+📦 **[Download the latest release ZIP →](https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/latest)**
 
-Every version ships as a downloadable bundle on the [Releases page](https://github.com/banksiasprings/bsf-solar-dispatch-starter/releases). The direct link for v1.0.0 is:
+Every version ships as a downloadable bundle on the [Releases page](https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases). The direct link for v1.0.0 is:
 
 ```
-https://github.com/banksiasprings/bsf-solar-dispatch-starter/releases/download/v1.0.0/bsf-solar-dispatch-starter.zip
+https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/download/v1.0.0/bsf-solar-dispatch-starter.zip
 ```
 
 ---
@@ -33,7 +33,22 @@ https://github.com/banksiasprings/bsf-solar-dispatch-starter/releases/download/v
 
 The whole point of this bundle is that you don't wire it together by hand.
 
-1. **[Download the release ZIP](https://github.com/banksiasprings/bsf-solar-dispatch-starter/releases/latest)** and unzip it.
+**One line, on the Mac / Linux box / Raspberry Pi that lives on the same network as your Cerbo:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/main/install.sh | sh
+```
+
+It checks Python, installs Claude Code if you don't have it, downloads this bundle to
+`~/bsf-solar-dispatch`, and opens Claude Code in it. Claude's first ask is **photos of your
+gear** (inverter, battery, hot-water unit, switchboard) — it identifies what you've got and
+tells you what will work *before* the config interview. Read [`install.sh`](install.sh) first
+if you like; it's 100 lines and touches nothing but that folder. You need your own Claude
+subscription.
+
+Or by hand:
+
+1. **[Download the release ZIP](https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/latest)** and unzip it.
 2. Open the folder with **Claude Code** or **Cowork** (`claude` in the folder, or open it in the app).
 3. Say: **"Install BSF Solar Dispatch."**
 

@@ -58,6 +58,33 @@ smoke`. Run `python3 install/deploy.py --help` once.
 
 ---
 
+## Step 0.5 — Photos first: identify the gear before asking a single config question
+
+Ask the user to **drag photos into this chat** (Claude Code reads image files). Ask for:
+inverter/charger nameplate, battery bank + BMS, each load they want switched (hot-water
+unit nameplate, its plug or isolator, air-con outdoor unit), the switchboard, and a
+screenshot of their VRM / monitoring app. Phone photos are fine.
+
+From the photos, **state what you see and what it means**, e.g.:
+- "Victron MultiPlus-II 48/5000 + Cerbo GX → supported, dispatcher runs on the Cerbo."
+- "Hot water is a 1 kW heat pump on a 10 A plug → a Tuya outdoor smart plug goes in between,
+  no electrician. Minimum-off timer must be ≥15 min (compressor)."
+- "3.6 kW element, hardwired → over a plug's 10 A; needs an electrician to fit a Tuya DIN-rail
+  contactor (≥25 A). Wi-Fi must reach the switchboard."
+- "Battery label says LiFePO4 → SOC bands 20/40, not the lead-acid defaults."
+- "Selectronic SP PRO / non-Victron inverter → NOT supported by this release. Say so plainly and
+  stop; Selectronic (Select.live) support is in development."
+
+Write the identified values (chemistry, array size, loads with `rated_w` and plug-vs-hardwired,
+inverter model) down as **pre-filled answers** for Step 1, so the wizard only has to confirm them.
+Anything you could not read from a photo, ask in the wizard. Never guess a safety value from a
+blurry photo — ask.
+
+**Success:** a short "what you've got and what will work" summary the user agrees with, before
+any config is written.
+
+---
+
 ## Step 1 — The configuration wizard (the important part)
 
 Copy the template — `cp config.example.json config.json` — then fill it in by **interviewing
