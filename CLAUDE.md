@@ -22,7 +22,8 @@ the steps **in order**, checking the success criteria before moving on.
 3. **The dispatcher is a safety system. Never improvise its logic.** You are *configuring*
    a tested flow (turning its constants into the user's values), not redesigning it. Deploy
    it via `deploy.py` so the values are validated and the JS is `node --check`ed.
-4. **It's free (MIT). The only money in it is a "buy me a coffee" link on the dashboard.**
+4. **It's free for personal use (PolyForm Noncommercial). The only money in it is a "buy me
+   a coffee" link on the dashboard.**
    Don't present it as a licence or a trial. It never affects dispatch.
 5. **If a step fails, stop and diagnose** with `install/troubleshooting.md`. Report the
    literal error. Verify before reporting done.

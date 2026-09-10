@@ -16,5 +16,8 @@ it switches real loads, and the safety envelope (SOC windows, night lockout, loa
 is not up for loosening without a very good reason. Run `python3 install/deploy.py check`
 and, if you have `node`, `python3 install/deploy.py flow --dry-run` before you push.
 
-Steven (@banksiaspringsfarm-rgb) reviews and merges. Contributions are MIT like the rest
-of the repo (see `LICENSE.md`).
+Steven (@banksiaspringsfarm-rgb) reviews and merges. By submitting a pull request you agree your
+contribution is licensed under the repo's licence (`LICENSE.md`, PolyForm Noncommercial) and
+that Steven may also relicense it as part of the project — that's what keeps a future
+commercial edition possible without having to chase every contributor. Your name stays in
+the git history.

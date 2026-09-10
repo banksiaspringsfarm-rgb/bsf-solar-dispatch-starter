@@ -3,7 +3,7 @@
 **A surplus-PV dispatcher for Victron Cerbo + Tuya.**
 
 [![Release](https://img.shields.io/github/v/release/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter?sort=semver)](https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/latest)
-[![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE.md)
+[![Licence](https://img.shields.io/badge/licence-free%20for%20personal%20use-blue)](LICENSE.md)
 [![Install](https://img.shields.io/badge/install-Claude%20Code%20~15%20min-7c4dff)](#install-via-claude-code-15-min)
 
 When your battery hits 100% by mid-morning and the panels spend the rest of the day
@@ -142,14 +142,15 @@ dashboard for a few days first.
 - ❌ Won't do true *cooling* dispatch as-shipped — it ships heating-direction; reversing it is a documented manual step.
 - ❌ Won't sign in to Tuya or create accounts for you — those sign-ups are yours to do.
 - ❌ Won't work without Node-RED on the Cerbo, or without a LAN host for the relay.
-- ❌ Won't nag, lock or expire — it's free. There's a ☕ link on the dashboard if you want to say thanks.
+- ❌ Won't nag, lock or expire — it's free for personal use. There's a ☕ link on the dashboard if you want to say thanks.
 - ❌ Won't carry a warranty or safety certification — you run it at your own risk.
 
 ---
 
 ## Free, and a coffee if you like
 
-It's **free and open source (MIT)** — use it, change it, share it. It runs on my farm and
+It's **free for personal and non-commercial use, forever** — source is right here, use it,
+change it, share it. It runs on my farm and
 I built it because the Victron community's Node-RED threads got me this far; this is me
 putting something back. If it's earning its keep at your place, a coffee is a nice way
 to say so. The ☕ on the dashboard goes to the same place. Never required, never nags
@@ -165,8 +166,10 @@ the common ones. Not affiliated with Victron or Tuya.
 
 ## Licence
 
-MIT — see [`LICENSE.md`](LICENSE.md). Do what you like with it; no warranty. It switches
-real electrical loads, so you run it at your own risk.
+[PolyForm Noncommercial 1.0.0](LICENSE.md). Free for personal and non-commercial use, no
+expiry; commercial use (selling it, installing it for paying customers, bundling it) needs
+Steven's permission — just ask. No warranty: it switches real electrical loads, so you run it
+at your own risk.
 
 ---
 

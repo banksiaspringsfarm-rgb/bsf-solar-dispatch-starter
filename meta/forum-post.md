@@ -59,7 +59,7 @@ I'd share what it does and a couple of things I learned, in case it's useful.
 
 **On cost / how I'm sharing it**
 
-It's free and open source (MIT) on GitHub. The Node-RED threads on this forum got me most
+It's free for personal use, source on GitHub. The Node-RED threads on this forum got me most
 of the way to my own install, so this is me putting something back. There's a "buy me a
 coffee" link on the dashboard if it ends up earning its keep at your place — never
 required, never nags more than once, and the dispatcher doesn't know it exists. No server,

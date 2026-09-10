@@ -34,7 +34,7 @@ Install is one line:
 
     curl -fsSL https://raw.githubusercontent.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/main/install.sh | sh
 
-Free and open source (MIT) — for everyone, not just beta testers. There's a "buy me a
+Free for personal use, forever — source on GitHub, for everyone, not just beta testers. There's a "buy me a
 coffee" link on the dashboard if you ever feel like it. No account, no server, no phone-home.
 
 What I want back: did the install get through, did the photo step identify your gear right,
