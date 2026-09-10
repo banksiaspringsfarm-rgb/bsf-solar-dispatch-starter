@@ -249,8 +249,8 @@
 <script src="dashboard-config.js" onerror="void 0"></script>
 <script>
   window.BSF_CONFIG = Object.assign(
-    { cerboIp: "192.168.1.50", lat: -27.47, lon: 153.02, trialDays: 30,
-      gumroadUrl: "https://banksiaspringsfarm.gumroad.com/l/solar-dispatch" },
+    { cerboIp: "192.168.1.50", lat: -27.47, lon: 153.02, tipAfterDays: 30,
+      tipUrl: "https://ko-fi.com/banksiaspringsfarm" },
     window.BSF_CONFIG || {}
   );
 </script>
@@ -2576,103 +2576,88 @@ window.__bsf={ state:state, history:samples, reader:reader, updateSky:updateSky,
 </script>
 
 <!-- ============================================================================
-     BSF Solar Dispatch — donation gate  (DISPLAY ONLY — never touches dispatch)
-     The Node-RED dispatcher on the Cerbo (hot water, air-con, presence) keeps
-     running no matter what this overlay shows. This is a polite, honour-system
-     reminder after a free trial. No server, no account, no phone-home.
-       • First page-load stamps a start time in this browser's localStorage.
-       • After trialDays (default 30) it shows a full-screen "send a coffee" card.
-       • Entering any valid UUID licence key dismisses it forever (trust-based).
-       • ?test_paywall=true compresses each day into ONE SECOND (30 days -> 30 s)
-         so you can verify the lock without waiting a month.
+     BSF Solar Dispatch — "buy me a coffee"  (DISPLAY ONLY — never touches dispatch)
+     The software is free (MIT). This is a thank-you link, not a licence gate.
+       • A small ☕ pill sits bottom-right, always. Tap = opens tipUrl.
+       • After tipAfterDays (default 30; 0 = never) a one-time card says thanks and
+         asks once. "Don't show again" hides it forever on this device. No key, no
+         server, no phone-home. The dispatcher never knows this exists.
+       • ?test_tip=true compresses each day into ONE SECOND so you can see the card.
+       • ?reset_tip=true forgets the dismissal on this device.
 ============================================================================ -->
 <style>
-  #bsf-paywall{position:fixed;inset:0;z-index:2147483600;display:none;
-    background:rgba(8,12,18,.975);-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);
-    color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    align-items:center;justify-content:center;padding:22px;box-sizing:border-box;}
-  #bsf-paywall.show{display:flex;}
-  #bsf-paywall .card{max-width:430px;width:100%;text-align:center;box-sizing:border-box;
-    background:#161b22;border:1px solid #2b333d;border-radius:18px;padding:30px 26px;
-    box-shadow:0 24px 70px rgba(0,0,0,.55);}
-  #bsf-paywall .emoji{font-size:36px;line-height:1;margin-bottom:8px;}
-  #bsf-paywall h2{margin:0 0 4px;font-size:21px;font-weight:700;color:#f3f4f6;letter-spacing:0;}
-  #bsf-paywall .sub{color:#9aa4b2;font-size:13.5px;margin:0 0 16px;}
-  #bsf-paywall p{font-size:15px;line-height:1.55;margin:0 0 12px;color:#e6e9ee;}
-  #bsf-paywall .amt{color:#f5b62e;font-weight:700;}
-  #bsf-paywall a.donate{display:block;background:#f5b62e;color:#1a1205;font-weight:700;
-    text-decoration:none;padding:13px;border-radius:11px;margin:18px 0 12px;font-size:16px;}
-  #bsf-paywall a.donate:active{transform:translateY(1px);}
-  #bsf-paywall .lic{display:flex;gap:8px;margin-top:4px;}
-  #bsf-paywall input{flex:1;min-width:0;padding:11px;border-radius:9px;border:1px solid #2b333d;
-    background:#0d1117;color:#f3f4f6;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;}
-  #bsf-paywall button.key{background:#2b333d;color:#f3f4f6;border:none;border-radius:9px;
-    padding:11px 15px;font-size:14px;cursor:pointer;white-space:nowrap;}
-  #bsf-paywall button.key:active{transform:translateY(1px);}
-  #bsf-paywall .err{color:#ef6b6b;font-size:12px;min-height:15px;margin-top:8px;}
-  #bsf-paywall .ok{color:#5fd38d;}
-  #bsf-paywall .foot{color:#6b7280;font-size:11px;margin-top:14px;line-height:1.4;}
+  #bsf-tip{position:fixed;right:12px;bottom:12px;z-index:2147483500;display:none;
+    background:#1b2129;color:#f5b62e;border:1px solid #2b333d;border-radius:999px;
+    padding:6px 11px;font:600 13px/1 system-ui,-apple-system,sans-serif;text-decoration:none;
+    opacity:.75;box-shadow:0 2px 8px rgba(0,0,0,.35);}
+  #bsf-tip:hover,#bsf-tip:active{opacity:1;}
+  #bsf-tip-card{position:fixed;inset:0;z-index:2147483600;display:none;
+    background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:18px;}
+  #bsf-tip-card.show{display:flex;}
+  #bsf-tip-card .card{max-width:420px;width:100%;text-align:center;box-sizing:border-box;
+    background:#12161c;border:1px solid #2b333d;border-radius:16px;padding:24px 22px;
+    font-family:system-ui,-apple-system,sans-serif;}
+  #bsf-tip-card .emoji{font-size:36px;line-height:1;margin-bottom:8px;}
+  #bsf-tip-card h2{margin:0 0 4px;font-size:20px;font-weight:700;color:#f3f4f6;}
+  #bsf-tip-card p{font-size:15px;line-height:1.55;margin:0 0 14px;color:#e6e9ee;}
+  #bsf-tip-card a.coffee{display:block;background:#f5b62e;color:#1a1205;font-weight:700;
+    padding:13px;border-radius:10px;text-decoration:none;font-size:16px;margin-bottom:10px;}
+  #bsf-tip-card button{background:none;border:none;color:#9aa4b2;font-size:13px;
+    padding:8px 10px;cursor:pointer;}
+  #bsf-tip-card .foot{color:#6b7280;font-size:11px;margin-top:10px;line-height:1.4;}
 </style>
-<div id="bsf-paywall" role="dialog" aria-modal="true" aria-label="Support BSF Solar Dispatch">
+<a id="bsf-tip" href="#" target="_blank" rel="noopener noreferrer" title="Buy Steven a coffee">☕</a>
+<div id="bsf-tip-card" role="dialog" aria-modal="true" aria-label="Thanks for running BSF Solar Dispatch">
   <div class="card">
-    <div class="emoji">🙏</div>
-    <h2 id="bsf-pw-title">BSF Solar Dispatch — 30 days in</h2>
-    <p class="sub">From one farmer to another — thanks for running it.</p>
-    <p>If this is making your life easier, please send me a coffee.<br>
-       Minimum <span class="amt">$2</span> to continue. Pay what you want above.</p>
-    <a class="donate" id="bsf-donate" href="#" target="_blank" rel="noopener noreferrer">☕ Donate on Gumroad</a>
-    <div class="lic">
-      <input id="bsf-key" placeholder="Paste licence key (UUID)" autocomplete="off" spellcheck="false" autocapitalize="off">
-      <button class="key" id="bsf-key-btn" type="button">Unlock</button>
-    </div>
-    <div class="err" id="bsf-key-err"></div>
-    <div class="foot">Honour system · no account · no subscription · yours forever once you've chipped in.</div>
+    <div class="emoji">☕</div>
+    <h2 id="bsf-tip-title">30 days of free solar dispatch</h2>
+    <p>This is free and always will be. If it's pulling its weight, a coffee says thanks.
+       Either way, your hot water keeps running.</p>
+    <a class="coffee" id="bsf-tip-link" href="#" target="_blank" rel="noopener noreferrer">☕ Buy Steven a coffee</a>
+    <button type="button" id="bsf-tip-later">Maybe later</button>
+    <button type="button" id="bsf-tip-never">Don't show again</button>
+    <div class="foot">Open source (MIT) · no account · no subscription · nothing phones home.</div>
   </div>
 </div>
 <script>
 (function(){
   var CFG=window.BSF_CONFIG||{};
-  var GUMROAD_URL=CFG.gumroadUrl||"https://banksiaspringsfarm.gumroad.com/l/solar-dispatch";
-  var LS_FIRST="bsf_dispatch_first_run", LS_LIC="bsf_dispatch_license";
+  var TIP_URL=CFG.tipUrl||CFG.gumroadUrl||"";
+  var LS_FIRST="bsf_dispatch_first_run", LS_DONE="bsf_dispatch_tip_done", LS_LATER="bsf_dispatch_tip_later";
   var q=new URLSearchParams(location.search);
-  var TEST=q.get("test_paywall")==="true";
-  var trialDays=(+CFG.trialDays)||30;
-  var trialMs=TEST ? trialDays*1000 : trialDays*24*3600*1000;   // test mode: 1 day -> 1 second
-  var UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  var TEST=q.get("test_tip")==="true";
+  var days=(CFG.tipAfterDays==null)?( (+CFG.trialDays)||30 ):(+CFG.tipAfterDays||0);
+  var dayMs=TEST?1000:24*3600*1000;
 
   function lget(k){try{return localStorage.getItem(k);}catch(e){return null;}}
   function lset(k,v){try{localStorage.setItem(k,v);}catch(e){}}
   function ldel(k){try{localStorage.removeItem(k);}catch(e){}}
 
-  // ?reset_trial=true -> wipe trial + licence on THIS device (re-test the trial flow)
-  if(q.get("reset_trial")==="true"){ ldel(LS_FIRST); ldel(LS_LIC);
+  if(q.get("reset_tip")==="true"){ ldel(LS_FIRST); ldel(LS_DONE); ldel(LS_LATER);
     if(history.replaceState){ history.replaceState(null,"",location.pathname); } }
 
-  if(lget(LS_LIC)) return;                       // already supported -> never gate again
+  var pill=document.getElementById("bsf-tip");
+  if(TIP_URL){ pill.href=TIP_URL; pill.style.display="block"; }
+  if(!TIP_URL || !days || lget(LS_DONE)) return;   // no link, disabled, or dismissed -> no card
 
   var first=parseInt(lget(LS_FIRST),10);
   if(!first||isNaN(first)){ first=Date.now(); lset(LS_FIRST,String(first)); }
-  // deploy.py --reset-trial bumps BSF_CONFIG.trialResetAt; restart the trial for any
-  // device whose first-run predates it (lets a fresh install re-arm the trial cleanly).
-  var resetAt=parseInt(CFG.trialResetAt,10);
-  if(resetAt && first < resetAt){ first=Date.now(); lset(LS_FIRST,String(first)); }
 
-  var el=document.getElementById("bsf-paywall");
-  document.getElementById("bsf-donate").href=GUMROAD_URL;
-  document.getElementById("bsf-pw-title").textContent="BSF Solar Dispatch — "+trialDays+" days in";
+  var el=document.getElementById("bsf-tip-card");
+  document.getElementById("bsf-tip-link").href=TIP_URL;
+  document.getElementById("bsf-tip-title").textContent=days+" days of free solar dispatch";
+  document.getElementById("bsf-tip-link").addEventListener("click",function(){ lset(LS_DONE,"1"); el.classList.remove("show"); });
+  document.getElementById("bsf-tip-never").addEventListener("click",function(){ lset(LS_DONE,"1"); el.classList.remove("show"); });
+  document.getElementById("bsf-tip-later").addEventListener("click",function(){ lset(LS_LATER,String(Date.now())); el.classList.remove("show"); });
 
   function check(){
-    if(lget(LS_LIC)){ el.classList.remove("show"); return; }
-    if(Date.now()-first >= trialMs){ el.classList.add("show"); }
+    if(lget(LS_DONE)) return;
+    var later=parseInt(lget(LS_LATER),10);
+    if(later && Date.now()-later < 14*dayMs) return;      // "maybe later" = ask again in a fortnight
+    if(Date.now()-first >= days*dayMs){ el.classList.add("show"); }
   }
-  document.getElementById("bsf-key-btn").addEventListener("click",function(){
-    var v=(document.getElementById("bsf-key").value||"").trim();
-    var err=document.getElementById("bsf-key-err");
-    if(UUID.test(v)){ lset(LS_LIC,v); err.className="err ok"; err.textContent="Thank you. Unlocked."; el.classList.remove("show"); }
-    else { err.className="err"; err.textContent="That doesn't look like a valid key (expected a UUID)."; }
-  });
   check();
-  if(TEST) setInterval(check,1000);              // poll so the lock appears live during a test countdown
+  if(TEST) setInterval(check,1000);
 })();
 </script>
 </body>

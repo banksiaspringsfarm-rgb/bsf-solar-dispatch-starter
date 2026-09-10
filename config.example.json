@@ -92,8 +92,8 @@
   },
 
   "dashboard": {
-    "trial_days": 30,
-    "gumroad_url": "https://banksiaspringsfarm.gumroad.com/l/solar-dispatch",
-    "_note": "trial_days = free-trial length before the donation card appears (deploy.py honours BETA_TESTER=1 → 90). gumroad_url = where the Donate button points."
+    "tip_after_days": 30,
+    "tip_url": "https://ko-fi.com/banksiaspringsfarm",
+    "_note": "The software is free (MIT). tip_url = where the dashboard's ☕buy me a coffee☕ link goes (\"\" hides it). tip_after_days = days before the one-time thank-you card (0 = never). Display only — never affects dispatch."
   }
 }

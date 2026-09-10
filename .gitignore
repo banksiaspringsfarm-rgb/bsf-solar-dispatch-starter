@@ -8,7 +8,7 @@
 # The one filled-in system config (holds Tuya access_id/secret + local keys)
 config.json
 
-# Generated, resolved dashboard config (real Cerbo IP, location, Gumroad key)
+# Generated, resolved dashboard config (real Cerbo IP, location)
 dashboard/dashboard-config.js
 
 # deploy.py build output — the flow with every real value stamped in

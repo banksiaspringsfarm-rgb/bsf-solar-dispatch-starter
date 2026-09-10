@@ -16,5 +16,5 @@ it switches real loads, and the safety envelope (SOC windows, night lockout, loa
 is not up for loosening without a very good reason. Run `python3 install/deploy.py check`
 and, if you have `node`, `python3 install/deploy.py flow --dry-run` before you push.
 
-Steven (@banksiaspringsfarm-rgb) reviews and merges. Contributions are accepted under the
-same terms as the rest of the bundle (see `LICENSE.md`).
+Steven (@banksiaspringsfarm-rgb) reviews and merges. Contributions are MIT like the rest
+of the repo (see `LICENSE.md`).

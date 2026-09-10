@@ -34,8 +34,8 @@ Install is one line:
 
     curl -fsSL https://raw.githubusercontent.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/main/install.sh | sh
 
-Free for beta testers (set `BETA_TESTER=1`, 90-day trial; it's donate-ware after that, min
-$2, dashboard-only nag, the dispatcher never stops). No account, no server, no phone-home.
+Free and open source (MIT) — for everyone, not just beta testers. There's a "buy me a
+coffee" link on the dashboard if you ever feel like it. No account, no server, no phone-home.
 
 What I want back: did the install get through, did the photo step identify your gear right,
 did it dispatch on a real surplus day, and what did it get wrong. Reply here or open an issue
@@ -72,7 +72,7 @@ Facebook page (they don't allow third-party promotion).
 ## Before posting — checklist
 
 - [ ] Public GitHub repo exists and the `curl … | sh` line works from a clean Mac and a clean Pi
-- [ ] `dashboard-screenshot.png` real, not placeholder (forum-post.md embeds it)
-- [ ] Gumroad URL live or removed from the post (beta post above doesn't need it)
+- [x] Real screenshots in `docs/images/` (cropped: no hostname, no personal photos)
+- [ ] Ko-fi (or Buy Me a Coffee) page created by Steven and `tip_url` updated everywhere
 - [ ] GitHub Issues enabled on the repo — that's where "it broke" reports go
 - [ ] Steven has 30 min/day for a week to answer replies

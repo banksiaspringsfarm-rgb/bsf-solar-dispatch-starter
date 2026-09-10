@@ -22,8 +22,8 @@ the steps **in order**, checking the success criteria before moving on.
 3. **The dispatcher is a safety system. Never improvise its logic.** You are *configuring*
    a tested flow (turning its constants into the user's values), not redesigning it. Deploy
    it via `deploy.py` so the values are validated and the JS is `node --check`ed.
-4. **The 30-day donation gate is dashboard-only and already built in.** Don't remove it or
-   present it as something to configure. It never affects dispatch.
+4. **It's free (MIT). The only money in it is a "buy me a coffee" link on the dashboard.**
+   Don't present it as a licence or a trial. It never affects dispatch.
 5. **If a step fails, stop and diagnose** with `install/troubleshooting.md`. Report the
    literal error. Verify before reporting done.
 
@@ -39,7 +39,7 @@ publisher/            the Python relay that feeds the dashboard + requirements.t
 widget/android/       Android home-screen widget (.apk)
 widget/ios/           iOS home-screen widget (Scriptable .js + README)
 install/              deploy.py + tuya-walkthrough + region map + troubleshooting
-meta/                 Gumroad / forum copy (ignore during install)
+meta/                 forum / beta-call copy (ignore during install)
 ```
 
 `install/deploy.py` is your power tool: `check · flow · dashboard · publisher · widget ·
@@ -133,8 +133,8 @@ Collect, in this order:
    reversing it for true cooling dispatch is a documented manual step (troubleshooting.md →
    "Summer cooling"). Capture `inside_temp_on_c`/`off_c` and `inside_temp_source`.
 10. **Display** — `display.currency`/`currency_symbol`/`price_per_kwh` (0 hides cost).
-11. **Dashboard** — `dashboard.gumroad_url` (the seller's, usually leave as-is);
-    `trial_days` (leave 30).
+11. **Dashboard** — `dashboard.tip_url` (the author's coffee link, leave as-is) and
+    `tip_after_days` (leave 30; 0 = never show the thank-you card).
 
 Write everything into `config.json`. **Re-running the wizard later just edits config.json
 and re-runs deploy — no reinstall.**
@@ -206,14 +206,14 @@ the user open `https://<cerbo>:1881`, then either disable auth or Import the gen
   a resolved config + the dashboard into the target and loads a launchd/systemd service
   (`farm.bsf.solar-dispatch-starter`).
 - `python3 install/deploy.py dashboard` — writes `dashboard-config.js` (Cerbo IP, lat/lon,
-  battery SOC bands from chemistry, currency, site name, AC mode, trial length, Gumroad URL).
+  battery SOC bands from chemistry, currency, site name, AC mode, coffee link).
 - Serve the dashboard from the relay's data dir, e.g.
   `cd <data-dir> && python3 -m http.server 8780`.
 
 **Success:** service loaded; `state.json` appears within ~30 s; the dashboard loads with live
 numbers (or a clear "reconnecting" notice if the broker's down).
-**Beta testers:** set `BETA_TESTER=1` before the `dashboard` step → 90-day trial. Re-arm with
-`python3 install/deploy.py --reset-trial`, or open the dashboard with `?reset_trial=true`.
+To preview the one-time thank-you card without waiting a month: open the dashboard with
+`?test_tip=true`. `?reset_tip=true` forgets a dismissal on that device.
 
 ---
 
@@ -248,7 +248,7 @@ to iOS — Scriptable is the sanctioned route; there's no native app by design.)
   numbers match reality (battery %, hot-water on/off, solar W).
 
 **Success:** fresh state, plausible live data, user confirms. Tell them plainly: installed and
-verified, here's the dashboard URL, here's how the trial works. Point them at `README.md` and
+verified, here's the dashboard URL, it's free, the ☕ is optional. Point them at `README.md` and
 `install/troubleshooting.md`.
 
 ---

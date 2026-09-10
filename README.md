@@ -3,7 +3,7 @@
 **A surplus-PV dispatcher for Victron Cerbo + Tuya.**
 
 [![Release](https://img.shields.io/github/v/release/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter?sort=semver)](https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/latest)
-[![Licence](https://img.shields.io/badge/licence-donate--ware%20%24'2%2B-blue)](LICENSE.md)
+[![Licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE.md)
 [![Install](https://img.shields.io/badge/install-Claude%20Code%20~15%20min-7c4dff)](#install-via-claude-code-15-min)
 
 When your battery hits 100% by mid-morning and the panels spend the rest of the day
@@ -14,6 +14,16 @@ otherwise be curtailed, then backs off the instant the surplus is gone or the ba
 needs it. It's not a thermostat with a solar sticker on it: it's a *surplus dispatcher*
 with a real safety envelope — battery state-of-charge windows, a hard night-time lockout,
 load caps, and presence-aware air-con — built and run on a working Queensland farm.
+
+---
+
+## What it looks like
+
+| Energy flow | Live signals | Android widget |
+|---|---|---|
+| ![Energy flow](docs/images/dashboard-flow.png) | ![Live signals](docs/images/dashboard-signals.png) | ![Android widget](docs/images/android-widget.png) |
+
+*Live from the farm: a 2.2 kW morning, battery at 80% and charging, +1.9 kW surplus, hot water arming.*
 
 ---
 
@@ -132,18 +142,20 @@ dashboard for a few days first.
 - ❌ Won't do true *cooling* dispatch as-shipped — it ships heating-direction; reversing it is a documented manual step.
 - ❌ Won't sign in to Tuya or create accounts for you — those sign-ups are yours to do.
 - ❌ Won't work without Node-RED on the Cerbo, or without a LAN host for the relay.
-- ❌ Won't lock your loads behind the donation trial — the reminder is dashboard-only; dispatch never stops.
+- ❌ Won't nag, lock or expire — it's free. There's a ☕ link on the dashboard if you want to say thanks.
 - ❌ Won't carry a warranty or safety certification — you run it at your own risk.
 
 ---
 
-## Support & donation
+## Free, and a coffee if you like
 
-This is **donate-ware**. Run it free for 30 days; if it's earning its keep, chuck a couple
-of dollars in the tin — **minimum $2 (AUD), one-off, yours forever**. The donation reminder
-is on the **dashboard only**; your hot water and air-con keep running regardless.
+It's **free and open source (MIT)** — use it, change it, share it. It runs on my farm and
+I built it because the Victron community's Node-RED threads got me this far; this is me
+putting something back. If it's earning its keep at your place, a coffee is a nice way
+to say so. The ☕ on the dashboard goes to the same place. Never required, never nags
+more than once, never touches dispatch.
 
-☕ **[Support / donate on Gumroad →](https://banksiaspringsfarm.gumroad.com/l/solar-dispatch)**
+☕ **[Buy Steven a coffee →](https://ko-fi.com/banksiaspringsfarm)**
 
 Support is community-flavoured — no SLA, no helpdesk. If something misbehaves, paste the
 error into Claude Code; [`install/troubleshooting.md`](install/troubleshooting.md) covers
@@ -153,10 +165,8 @@ the common ones. Not affiliated with Victron or Tuya.
 
 ## Licence
 
-Donate-ware — see [`LICENSE.md`](LICENSE.md). Plain English: run free for 30 days, pay $2+
-once if you keep it, yours forever on your own systems, no warranty, don't resell or
-redistribute it as your own. If your local consumer law grants rights that can't be
-excluded, those still apply.
+MIT — see [`LICENSE.md`](LICENSE.md). Do what you like with it; no warranty. It switches
+real electrical loads, so you run it at your own risk.
 
 ---
 

@@ -32,7 +32,7 @@ I'd share what it does and a couple of things I learned, in case it's useful.
   state-of-charge windows, a **hard night-time lockout**, **load caps**, and
   **presence-aware air-con**. Conservative defaults out of the box.
 
-![BSF Solar Dispatch dashboard](dashboard-screenshot.png)
+(attach: `docs/images/dashboard-flow.png` and `docs/images/android-widget.png` from the repo)
 
 **A few things I learned building it (the bits that mattered)**
 
@@ -59,18 +59,18 @@ I'd share what it does and a couple of things I learned, in case it's useful.
 
 **On cost / how I'm sharing it**
 
-It's donate-ware. Run it **free for 30 days**, and if it's pulling its weight, chuck a
-couple of dollars in the tin — minimum $2 AUD, one-off, no subscription, yours forever.
-The donation reminder shows on the **dashboard only**; the dispatcher (hot water,
-air-con, the lot) keeps running regardless. No server, no account, no phone-home — it
-works on trust.
+It's free and open source (MIT) on GitHub. The Node-RED threads on this forum got me most
+of the way to my own install, so this is me putting something back. There's a "buy me a
+coffee" link on the dashboard if it ends up earning its keep at your place — never
+required, never nags more than once, and the dispatcher doesn't know it exists. No server,
+no account, no phone-home.
 
 It installs with Claude Code / Cowork doing the mechanical parts (config, deploying the
 flow, the relay service, smoke test) — about 15–30 minutes, most of it that one-time Tuya
 setup, which it walks you through.
 
-If you want to grab it, it's here:
-**https://banksiaspringsfarm.gumroad.com/l/solar-dispatch**
+Repo, install line and docs:
+**https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter**
 
 I'm not trying to spam the forum — just sharing something I built that scratched a real
 itch, and the link's there if it scratches yours too.
