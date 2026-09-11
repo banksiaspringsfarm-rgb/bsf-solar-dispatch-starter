@@ -30,9 +30,8 @@ is driven by Claude Code, which reads photos of your gear, works out what will a
 then does the config, flow deploy and service install with you. About 15–30 min, most of it
 the one-time Tuya cloud sign-up.
 
-Install is one line:
-
-    curl -fsSL https://raw.githubusercontent.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/main/install.sh | sh
+Install is one line — it's at the top of the README:
+https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter
 
 Free for personal use, forever — source on GitHub, for everyone, not just beta testers. There's a "buy me a
 coffee" link on the dashboard if you ever feel like it. No account, no server, no phone-home.
@@ -50,6 +49,13 @@ on the repo. I'll fix things as they come in.
 Rules of thumb: post in "share your project / modifications" spaces, not general help; lead
 with what it does and what you learned, not the link; answer every reply for the first week.
 One post per community; don't cross-post the same day.
+
+**Spam-filter lesson (Victron Community, 11 Sep):** a new account + external link + a
+`curl … | sh` line = "Account temporarily on hold" and the post hidden until a moderator
+clears it. Before posting anywhere new: reply helpfully in 2–3 existing threads first, put
+ONE link (the repo) in the post, and never paste the curl line — say "one-line install in
+the README". New accounts usually can't upload images either; add screenshots by editing
+the post once trust level 1 kicks in.
 
 | # | Community | Where exactly | Why / notes |
 |---|---|---|---|
