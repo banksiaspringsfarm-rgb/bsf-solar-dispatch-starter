@@ -1,6 +1,6 @@
 # Beta-tester call — post copy + where to post
 
-Status: DRAFT for Steven (2026-09-11). Nothing posted yet. The one-line installer needs the
+Status: TALKING POINTS ONLY (updated 2026-09-12). Forums reject AI-written posts — Steven writes every post himself, in his own words, from these notes. The one-line installer needs the
 public GitHub repo to exist first — post nothing until the `curl … | sh` line actually works.
 
 ---
@@ -49,6 +49,8 @@ on the repo. I'll fix things as they come in.
 Rules of thumb: post in "share your project / modifications" spaces, not general help; lead
 with what it does and what you learned, not the link; answer every reply for the first week.
 One post per community; don't cross-post the same day.
+
+**AI-content rejection (Victron Community, 12 Sep):** moderators rejected the Claude-drafted post with "Reason: AI content". Every post must be written by Steven himself; the prose drafts in this file and `forum-post.md` are reference for WHAT to say, never text to paste. Saying the software was built with Claude's help is fine.
 
 **Spam-filter lesson (Victron Community, 11 Sep):** a new account + external link + a
 `curl … | sh` line = "Account temporarily on hold" and the post hidden until a moderator

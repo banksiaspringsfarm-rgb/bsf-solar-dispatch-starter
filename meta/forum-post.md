@@ -1,3 +1,5 @@
+<!-- REFERENCE ONLY. Rejected by Victron Community moderators 2026-09-12 as AI content.
+     Do not paste. Steven writes his own post from the talking points in beta-call.md. -->
 <!-- Draft post for the Victron Community forum (community.victronenergy.com).
      Tone: "I built this for my farm, here's what it does and what I learned."
      Not an ad. Steven can edit before posting. -->
