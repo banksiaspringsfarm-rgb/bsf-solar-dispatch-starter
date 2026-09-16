@@ -24,7 +24,7 @@ packages:
 runcmd:
 - [sh, -c, "curl -fsSL https://tailscale.com/install.sh | sh"]
 - [systemctl, enable, --now, mosquitto]
-- [sh, -c, "echo 'listener 1883\nallow_anonymous true' > /etc/mosquitto/conf.d/lan.conf && systemctl restart mosquitto"]
+- [sh, -c, "printf 'listener 1883\nallow_anonymous true\nlistener 9001\nprotocol websockets\nallow_anonymous true\n' > /etc/mosquitto/conf.d/lan.conf && systemctl restart mosquitto"]
 - [sh, -c, "curl -fsSL https://raw.githubusercontent.com/node-red/linux-installers/master/deb/update-nodejs-and-nodered -o /home/bsf/nr.sh && chown bsf:bsf /home/bsf/nr.sh"]
 - [sudo, -u, bsf, bash, /home/bsf/nr.sh, --confirm-install, --confirm-pi, --skip-pi, --no-init, --node22]
 - [sudo, -u, bsf, bash, -c, "mkdir -p /home/bsf/.node-red && cd /home/bsf/.node-red && npm i --no-audit --no-fund node-red-contrib-tuya-smart-device"]

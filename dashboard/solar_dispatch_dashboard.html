@@ -1259,7 +1259,8 @@ function signW(x){ var n=num(x); if(n===null)return '–'; return (n>=0?'+':'')+
 samples=prune(load(HKEY)); events=prune(load(EKEY));
 
 /* ---- MQTT ---- */
-var reader=new MqttWsReader('ws://'+((window.BSF_CONFIG&&window.BSF_CONFIG.cerboIp)||'192.168.1.50')+':9001',
+/* broker host: config cerboIp, else whichever host served this page (Pi installs: broker + dashboard are the same box) */
+var reader=new MqttWsReader('ws://'+((window.BSF_CONFIG&&window.BSF_CONFIG.cerboIp)||location.hostname||'192.168.1.50')+':9001',
   ['bsf/hotwater/status','bsf/ac/status','bsf/hotwater/log','bsf/ac/log','bsf/hotwater/anomaly','bsf/ac/anomaly',
    'bsf/presence/state','bsf/presence/candidates'],
   { onStatus:onStatus, onMessage:onMessage });
@@ -1285,9 +1286,10 @@ function startHttpMode(){
   httpTimer=setInterval(pollHttp, POLL_MS);
   histTimer=setInterval(loadHttpHistory, 60000);
 }
+/* the farm relay serves /solar/state + /solar/history; a plain static server (Pi install) has state.json + history.json */
+function fetchFirst(urls){ return urls.reduce(function(p,u){ return p.catch(function(){ return fetch(u,{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); }); }); }, Promise.reject()); }
 function pollHttp(){
-  fetch('/solar/state',{cache:'no-store'})
-    .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+  fetchFirst(['/solar/state','state.json'])
     .then(function(snap){
       if(!snap || !snap.ok || (!snap.hw && !snap.ac)){ state.conn='stale'; paintConn(); paintStale(currentSnapshot()); return; }
       var now=Date.now();
@@ -1303,7 +1305,7 @@ function pollHttp(){
     .catch(function(){ state.conn='closed'; paintConn(); paintStale(currentSnapshot()); });
 }
 function loadHttpHistory(){
-  fetch('/solar/history',{cache:'no-store'}).then(function(r){return r.json();}).then(function(h){
+  fetchFirst(['/solar/history','history.json']).then(function(h){
     if(!h) return;
     if(Array.isArray(h.samples)){ samples=prune(h.samples); save(HKEY,samples); $('tmSlider').max=Math.max(0,samples.length-1); if(viewLive) $('tmSlider').value=samples.length-1; }
     if(Array.isArray(h.events)){ events=prune(h.events); save(EKEY,events); renderHistory(); }

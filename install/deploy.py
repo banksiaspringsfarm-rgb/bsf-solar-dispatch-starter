@@ -293,7 +293,7 @@ def cmd_dashboard(cfg, args):
     sw=D.get("soc_windows",{}) or {}; ac=D.get("ac",{}) or {}
     js={
       "siteName": cfg.get("site_name","Solar"),
-      "cerboIp": _g(cfg,"hardware.cerbo_ip","192.168.1.50"),
+      "cerboIp": "" if _inverter_kind(cfg)=="selectronic" else _g(cfg,"hardware.cerbo_ip","192.168.1.50"),   # "" = the host serving the page
       "lat": _num(_g(cfg,"location.lat"),-27.47), "lon": _num(_g(cfg,"location.lon"),153.02),
       "tipAfterDays": tip_days, "tipUrl": tip_url,
       "chemistry": chem, "socDanger": dpct, "socWarn": wpct,
@@ -353,10 +353,31 @@ def cmd_publisher(cfg, args):
                 bunit=os.path.expanduser(f"~/.config/systemd/user/{LABEL}-selectlive.service")
                 _write_systemd(bunit, py, os.path.join(tgt,"selectlive_bridge.py"), cfg_dest, tgt, "Select.live -> MQTT bridge")
                 ok(f"Wrote systemd unit → {bunit}")
+            dunit=os.path.expanduser("~/.config/systemd/user/bsf-dashboard-http.service")
+            open(dunit,"w").write(f"""[Unit]
+Description=BSF Solar Dispatch dashboard static server (:8780)
+After=network-online.target
+
+[Service]
+WorkingDirectory={data_dir}
+ExecStart={py} -m http.server 8780 --bind 0.0.0.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+""")
+            ok(f"Wrote systemd unit → {dunit} (dashboard on :8780)")
             if args.no_start: warn(f"--no-start: enable later: systemctl --user enable --now {LABEL}")
             else:
+                # user services must outlive the SSH session on a headless Pi
+                user=os.environ.get("USER") or ""
+                r=subprocess.run(["loginctl","show-user",user,"-p","Linger","--value"], capture_output=True, text=True)
+                if r.stdout.strip()!="yes":
+                    r2=subprocess.run(["sudo","-n","loginctl","enable-linger",user], capture_output=True, text=True)
+                    (ok if r2.returncode==0 else warn)("loginctl enable-linger " + ("ok — services run without a login" if r2.returncode==0 else f"failed — run: sudo loginctl enable-linger {user}"))
                 subprocess.run(["systemctl","--user","daemon-reload"])
-                for svc in ([LABEL, LABEL+"-selectlive"] if sel else [LABEL]):
+                for svc in ([LABEL, LABEL+"-selectlive"] if sel else [LABEL])+["bsf-dashboard-http"]:
                     r=subprocess.run(["systemctl","--user","enable","--now",svc], capture_output=True, text=True)
                     (ok if r.returncode==0 else warn)(f"systemctl enable --now {svc} rc={r.returncode} {r.stderr.strip()}")
     else:

@@ -78,8 +78,9 @@ runbook: `config.json` with `hardware.inverter.kind = "selectronic"` (or `victro
 `python3 install/deploy.py check`, `flow --deploy`, `publisher`, `dashboard`, `smoke`.
 On a Selectronic install `publisher` also installs the Select.live bridge service.
 
-Serve the dashboard: `cd ~/bsf-solar-dispatch/dispatch-host && python3 -m http.server 8780`
-(or put that in a systemd unit). On the tailnet it's `http://<hostname>:8780/solar_dispatch_dashboard.html`.
+`deploy.py publisher` on Linux also writes a `bsf-dashboard-http` user unit (static server on
+:8780) and enables lingering so the user services run with nobody logged in. On the tailnet the
+dashboard is `http://<hostname>:8780/solar_dispatch_dashboard.html`.
 
 ## 6. Deploying at the remote site
 
