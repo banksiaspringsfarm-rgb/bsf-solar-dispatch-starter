@@ -126,7 +126,8 @@ def main():
     client = None
     if not a.no_mqtt:
         import paho.mqtt.client as mqtt
-        client = mqtt.Client(client_id="selectlive-bridge")
+        try:    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="selectlive-bridge")  # paho 2.x
+        except AttributeError: client = mqtt.Client(client_id="selectlive-bridge")                    # paho 1.6
         client.connect(sel["mqtt_host"], int(sel["mqtt_port"]), 60); client.loop_start()
     pre = sel["topic_prefix"].rstrip("/")
     def pub(suffix, payload):
