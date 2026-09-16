@@ -88,5 +88,12 @@ Everything is on the stick/card. At the site: plug in Ethernet + power. Because 
 already joined, `ssh bsf@<hostname>` works from home the moment it has internet. Then edit
 `config.json` for the real Select.live IP + plug IDs and re-run `deploy.py` — no reflash.
 
-If the site only has Wi-Fi, add a `wifis:` block to `network-config` before flashing (see
-cloud-init netplan docs) or set it up on the LAN before it leaves.
+If the site only has Wi-Fi, pre-save the network on the Pi before it leaves (NetworkManager
+autoconnects when it sees the SSID; Ethernet still works alongside):
+```bash
+sudo raspi-config nonint do_wifi_country AU      # unblocks the radio on a fresh Pi OS Lite
+sudo nmcli con add type wifi ifname wlan0 con-name site-wifi ssid "THEIR-SSID" \
+  wifi-sec.key-mgmt wpa-psk wifi-sec.psk "THEIR-PASSWORD" connection.autoconnect yes
+nmcli -t -f SSID,SIGNAL dev wifi list             # proves the radio scans
+```
+Save several sites' networks on one Pi if you like — it joins whichever it finds.
