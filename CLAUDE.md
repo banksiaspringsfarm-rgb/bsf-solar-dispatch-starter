@@ -73,8 +73,11 @@ From the photos, **state what you see and what it means**, e.g.:
 - "3.6 kW element, hardwired → over a plug's 10 A; needs an electrician to fit a Tuya DIN-rail
   contactor (≥25 A). Wi-Fi must reach the switchboard."
 - "Battery label says LiFePO4 → SOC bands 20/40, not the lead-acid defaults."
-- "Selectronic SP PRO / non-Victron inverter → NOT supported by this release. Say so plainly and
-  stop; Selectronic (Select.live) support is in development."
+- "Selectronic SP PRO + a Select.live box → supported: the dispatcher runs in Node-RED on a
+  Raspberry Pi instead of a Cerbo. Set `hardware.inverter.kind = "selectronic"`, provision the Pi
+  first (`install/pi-setup.md`), and note the curtailment signal is inferred, not measured."
+- "Any other inverter (SMA, Sungrow, Fronius-only, Enphase…) → NOT supported. Say so plainly and
+  stop."
 
 Write the identified values (chemistry, array size, loads with `rated_w` and plug-vs-hardwired,
 inverter model) down as **pre-filled answers** for Step 1, so the wizard only has to confirm them.
@@ -101,9 +104,15 @@ Collect, in this order:
 
 1. **Site & location** — `site_name`; `location.lat/lon` (derive from town/postcode if they
    don't know) + `timezone` (IANA, e.g. `Australia/Brisbane`).
-2. **Hardware identity** — `hardware.cerbo_ip` (Cerbo → Settings → Network); `mqtt_port`
-   (default 1883); `vrm_portal_id` (Cerbo → Settings → VRM online portal); `inverter.model`
-   + `rating_kw`; `fronius.present` (+ ip/size if yes).
+2. **Hardware identity** — first `hardware.inverter.kind` (AskUserQuestion: **victron** /
+   **selectronic**). Victron: `hardware.cerbo_ip` (Cerbo → Settings → Network); `mqtt_port`
+   (default 1883); `vrm_portal_id` (Cerbo → Settings → VRM online portal). Selectronic:
+   `hardware.selectronic.ip` (the Select.live box) + `device_id` (open
+   `http://<ip>/cgi-bin/solarmonweb/devices/` in a browser — the 32-hex id), leave
+   `mqtt_host` at 127.0.0.1 and `nodered_url` blank (= the Pi's own Node-RED), and skip the
+   VRM id + chargers (the per-charger drill-down has nothing to read). Both: `inverter.model`
+   + `rating_kw`; `fronius.present` (+ ip/size if yes — on an SP PRO this is the AC-coupled
+   inverter, whatever brand).
 3. **Chargers** — `hardware.chargers[]`, ONE entry per solar tracker (any count). For each:
    `kind` (`solarcharger` MPPT, or `multi` for a Multi-RS PV tracker), `instance` (VE device
    instance), a short unique `key`, a `label`, optional `kw`. Ask how many MPPTs/trackers
@@ -187,7 +196,12 @@ still work, only the flow's direct LAN-control branch stays idle.
 
 ---
 
-## Step 4 — Deploy the dispatcher flow to the Cerbo
+## Step 4 — Deploy the dispatcher flow (Cerbo, or the Pi's Node-RED for Selectronic)
+
+Selectronic installs: `deploy.py flow` swaps the flow's 18 Victron input nodes for `mqtt in`
+nodes on `sel/*` (fed by the bridge) and POSTs to `hardware.nodered_url` (default
+`http://127.0.0.1:1880`, i.e. run deploy.py **on the Pi**, or set the URL to the Pi's
+address). The Pi must already have Node-RED + Mosquitto — `install/pi-setup.md`.
 
 - Dry run: `python3 install/deploy.py flow --dry-run`. It stamps every config value into the
   flow, validates the JSON, and (if `node` is installed) `node --check`s every function body.
@@ -195,7 +209,7 @@ still work, only the flow's direct LAN-control branch stays idle.
 - Deploy: `python3 install/deploy.py flow --deploy` → GETs the rev, POSTs the substituted
   flow (`type=flows`, only changed tabs restart). Output shows `Deployed. rev X → Y`.
 
-**Failure:** connection refused → Cerbo offline. 401/auth → Node-RED admin auth is on; have
+**Failure:** connection refused → Cerbo/Pi Node-RED offline. 401/auth → Node-RED admin auth is on; have
 the user open `https://<cerbo>:1881`, then either disable auth or Import the generated
 `.build/bsf-solar-dispatch.deployed.flow.json` manually in the editor. Paste errors into chat.
 
@@ -205,7 +219,10 @@ the user open `https://<cerbo>:1881`, then either disable auth or Import the gen
 
 - `python3 install/deploy.py publisher` (optionally `--target <dir>`). Installs the relay +
   a resolved config + the dashboard into the target and loads a launchd/systemd service
-  (`farm.bsf.solar-dispatch-starter`).
+  (`farm.bsf.solar-dispatch-starter`). Selectronic: also installs the Select.live bridge as
+  `farm.bsf.solar-dispatch-starter-selectlive`; check it with
+  `mosquitto_sub -t 'sel/#' -v` — `sel/soc`, `sel/ac_load`, `sel/batt_power` must tick every
+  ~10 s before the dispatcher has anything to work with.
 - `python3 install/deploy.py dashboard` — writes `dashboard-config.js` (Cerbo IP, lat/lon,
   battery SOC bands from chemistry, currency, site name, AC mode, coffee link).
 - Serve the dashboard from the relay's data dir, e.g.

@@ -80,6 +80,7 @@ section if you'd rather drive it yourself.
 | You need | Details |
 |---|---|
 | **Victron Cerbo GX** (or any Venus OS device) running **Node-RED** | The standard Victron Large image, or Node-RED installed on Venus OS. |
+| **…or a Selectronic SP PRO** with a **Select.live** box on the LAN | Supported since v1.1. The dispatcher then runs in Node-RED on a Raspberry Pi (see [`install/pi-setup.md`](install/pi-setup.md)); a small bridge polls the Select.live local JSON and feeds it in. Curtailment is inferred (no MPPT flag on an SP PRO). |
 | **Tuya / Smart Life smart plugs** | One per load you want to switch (hot-water element, air-con, pump…), already paired in a Smart Life / Tuya Smart app account. |
 | **A computer on the same LAN as the Cerbo** | Runs the read-only dashboard relay. macOS or Linux, Python 3.8+. A Raspberry Pi is ideal. |
 | **Any phone** | The dashboard is a web page — iPhone or Android. "Add to Home Screen" makes it a full-screen app. Optional native home-screen widgets for both (Android APK; iOS via the free **Scriptable** app). |
@@ -99,6 +100,8 @@ answers the questions that matter. Nothing is hard-coded to one farm.
 | [`node-red/bsf-solar-dispatch.flow.json`](node-red/bsf-solar-dispatch.flow.json) | The dispatcher — the brain. Imports into your Cerbo's Node-RED. Hot-water state machine, canonical Victron curtailment detection, air-con thresholds, presence gate, night lockout, load caps. |
 | [`dashboard/solar_dispatch_dashboard.html`](dashboard/solar_dispatch_dashboard.html) | Single-file phone dashboard: live energy-flow diagram, SOC ring, per-charger solar breakdown, sun/moon horizon arc, weekly stats. |
 | [`publisher/solar_state_publisher.py`](publisher/solar_state_publisher.py) | Read-only relay that reads the Cerbo and feeds the dashboard. Stdlib + `paho-mqtt`. |
+| [`publisher/selectlive_bridge.py`](publisher/selectlive_bridge.py) | Selectronic only: polls the Select.live local JSON and republishes SOC / PV / load / battery W on MQTT for the dispatcher. |
+| [`install/pi-setup.md`](install/pi-setup.md) | Turning a Raspberry Pi into the whole controller (Node-RED + broker + relay + Tailscale) — needed for Selectronic, optional for Victron. |
 | [`widget/android/`](widget/android/) · [`widget/ios/`](widget/ios/) | Optional home-screen widgets — Android `.apk`; iPhone via the free Scriptable app. |
 | [`install/`](install/) | `deploy.py` installer + Tuya setup walkthrough, region→data-center map, troubleshooting. |
 | [`config.example.json`](config.example.json) | The one system-config file. The wizard fills a copy (`config.json`). |
@@ -137,11 +140,11 @@ dashboard for a few days first.
 
 ## What this *won't* do
 
-- ❌ Won't run on non-Victron systems — it reads a Victron Cerbo / Venus OS over MQTT.
+- ❌ Won't run on inverters other than Victron (Cerbo / Venus OS) or Selectronic SP PRO (Select.live). No SMA, Fronius-only, Sungrow… yet.
 - ❌ Won't control non-Tuya plugs (no Shelly, Zigbee, or Z-Wave out of the box).
 - ❌ Won't do true *cooling* dispatch as-shipped — it ships heating-direction; reversing it is a documented manual step.
 - ❌ Won't sign in to Tuya or create accounts for you — those sign-ups are yours to do.
-- ❌ Won't work without Node-RED on the Cerbo, or without a LAN host for the relay.
+- ❌ Won't work without Node-RED (on the Cerbo, or on the Pi for a Selectronic install), or without a LAN host for the relay.
 - ❌ Won't nag, lock or expire — it's free for personal use. There's a ☕ link on the dashboard if you want to say thanks.
 - ❌ Won't carry a warranty or safety certification — you run it at your own risk.
 

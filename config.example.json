@@ -1,30 +1,82 @@
 {
   "_README": "Copy to config.json and fill in YOUR values, or just run the install wizard (open the folder with Claude Code and say 'install BSF Solar Dispatch' — it asks the questions and writes this for you). This ONE file is the whole system config: the publisher reads it at runtime, and install/deploy.py stamps it into the Node-RED flow + generates the dashboard config. Every default below is roughly a 'typical Australian Victron Cerbo + ~5kW solar + lead-acid + Tuya plugs' setup (≈ the farm it was built on) — installs like that hit Next through most of the wizard; different rigs answer the questions that matter. Keep config.json private (it holds your Tuya keys). _comment keys are ignored. Numeric defaults left as-is reproduce the original tested dispatcher behaviour exactly.",
-
   "site_name": "Banksia Springs",
   "_site_name": "Shown in the dashboard header + widget. Make it your place.",
-
-  "location": { "lat": -27.47, "lon": 153.02, "timezone": "Australia/Brisbane" },
+  "location": {
+    "lat": -27.47,
+    "lon": 153.02,
+    "timezone": "Australia/Brisbane"
+  },
   "_location": "Decimal degrees (negative lat = southern hemisphere). Drives sunrise/sunset in the dispatcher + the sun/moon arc on the dashboard. timezone is an IANA name (e.g. Australia/Brisbane, Europe/Berlin).",
-
   "hardware": {
     "cerbo_ip": "192.168.1.50",
     "mqtt_port": 1883,
     "vrm_portal_id": "YOUR_VRM_PORTAL_ID",
     "_vrm_portal_id": "Cerbo → Settings → VRM online portal → VRM Portal ID (12 hex). Used read-only for the per-charger MPPT breakdown.",
-    "inverter": { "model": "", "rating_kw": 5.0 },
+    "inverter": {
+      "model": "",
+      "rating_kw": 5.0,
+      "kind": "victron"
+    },
     "_inverter": "Your inverter/charger model + continuous rating in kW (informational + sanity caps).",
-    "fronius": { "present": true, "ip": "", "model": "", "size_kw": 0 },
+    "fronius": {
+      "present": true,
+      "ip": "",
+      "model": "",
+      "size_kw": 0
+    },
     "_fronius": "AC-coupled Fronius? present=false if you have none (the Fronius-curtailment signal is then ignored).",
     "chargers": [
-      { "kind": "solarcharger", "instance": 288, "tracker": 0, "key": "m288", "label": "MPPT 288", "kw": null },
-      { "kind": "solarcharger", "instance": 289, "tracker": 0, "key": "m289", "label": "MPPT 289", "kw": null },
-      { "kind": "multi", "instance": 0, "tracker": 0, "key": "rs1", "label": "RS Solar 1", "kw": null },
-      { "kind": "multi", "instance": 0, "tracker": 1, "key": "rs2", "label": "RS Solar 2", "kw": null }
+      {
+        "kind": "solarcharger",
+        "instance": 288,
+        "tracker": 0,
+        "key": "m288",
+        "label": "MPPT 288",
+        "kw": null
+      },
+      {
+        "kind": "solarcharger",
+        "instance": 289,
+        "tracker": 0,
+        "key": "m289",
+        "label": "MPPT 289",
+        "kw": null
+      },
+      {
+        "kind": "multi",
+        "instance": 0,
+        "tracker": 0,
+        "key": "rs1",
+        "label": "RS Solar 1",
+        "kw": null
+      },
+      {
+        "kind": "multi",
+        "instance": 0,
+        "tracker": 1,
+        "key": "rs2",
+        "label": "RS Solar 2",
+        "kw": null
+      }
     ],
-    "_chargers": "ONE entry per solar tracker, any count (2/4/6…). kind='solarcharger' for a BlueSolar/SmartSolar MPPT (uses N/<portal>/solarcharger/<instance>/Yield/Power); kind='multi' for a Multi RS PV tracker (uses N/<portal>/multi/<instance>/Pv/<tracker>/P). 'instance' is the VE device instance; 'key' is a short unique id used on the dashboard's per-charger drill-down; 'kw' optional rated size. Find your instances in VRM/Node-RED (victron-input-solarcharger service list)."
+    "_chargers": "ONE entry per solar tracker, any count (2/4/6…). kind='solarcharger' for a BlueSolar/SmartSolar MPPT (uses N/<portal>/solarcharger/<instance>/Yield/Power); kind='multi' for a Multi RS PV tracker (uses N/<portal>/multi/<instance>/Pv/<tracker>/P). 'instance' is the VE device instance; 'key' is a short unique id used on the dashboard's per-charger drill-down; 'kw' optional rated size. Find your instances in VRM/Node-RED (victron-input-solarcharger service list).",
+    "_inverter_kind": "'victron' (Cerbo GX / Venus OS -- what ships) or 'selectronic' (SP PRO via a Select.live box on the LAN). selectronic swaps the flow's Victron input nodes for MQTT ones fed by publisher/selectlive_bridge.py, and points deploy at a local Node-RED (hardware.nodered_url) instead of the Cerbo.",
+    "nodered_url": "",
+    "_nodered_url": "Where deploy.py POSTs the flow. Blank = https://<cerbo_ip>:1881 (Cerbo). On a Pi/Selectronic install: http://127.0.0.1:1880",
+    "selectronic": {
+      "ip": "",
+      "device_id": "",
+      "poll_s": 10,
+      "curtail_soc_pct": 95,
+      "curtail_batt_w": 300,
+      "curtail_min_pv_w": 400,
+      "invert_battery_sign": false,
+      "mqtt_host": "127.0.0.1",
+      "topic_prefix": "sel"
+    },
+    "_selectronic": "Only when inverter.kind='selectronic'. ip = the Select.live box's LAN address; device_id = the 32-hex id listed at http://<ip>/cgi-bin/solarmonweb/devices/ . Curtailment is synthesised (no MPPT flag on an SP PRO): SOC>=curtail_soc_pct AND |battery_w|<=curtail_batt_w AND solar>=curtail_min_pv_w. mqtt_host = the broker the flow uses (the Pi itself)."
   },
-
   "battery": {
     "chemistry": "lead-acid",
     "capacity_kwh": null,
@@ -35,29 +87,61 @@
     "soc_warn_pct": 75,
     "_chemistry": "lead-acid | lifepo4 | lithium-ion. Drives the dashboard SOC colour bands (and is the safety reason the dispatcher keeps SOC high). The wizard auto-fills soc_danger/soc_warn from chemistry: lead-acid 60/75 (must NOT sit low), lifepo4/lithium-ion 20/40. Override if you know your bank. SOC at/below danger = red, below warn = amber, above = green."
   },
-
   "solar": {
     "total_dc_kw": 13.5,
     "curtailment_mode": "auto",
     "_total_dc_kw": "Total DC array size (sum of your trackers). Informational + scales the curtailment 'forgone kWh' estimate.",
     "_curtailment_mode": "How the dispatcher decides solar is being throttled: 'auto' (canonical MPPT MppOperationMode if your chargers are wired, else Fronius freq-shift, else SOC heuristic), 'mppt_operation', 'fronius_freq', or 'soc_fallback'. Leave 'auto' unless you know better."
   },
-
   "tuya": {
     "access_id": "YOUR_TUYA_ACCESS_ID",
     "access_secret": "YOUR_TUYA_ACCESS_SECRET",
     "api_host": "https://openapi.tuyaeu.com",
     "_api_host": "Your Tuya cloud data-center endpoint — MUST match the region your Smart Life app account is homed to. See install/region-datacenter-map.md (Australia: usually https://openapi.tuyaeu.com)."
   },
-
   "loads": [
-    { "role": "hot_water",  "label": "Hot Water",          "device_id": "YOUR_HW_DEVICE_ID",     "local_key": "YOUR_HW_LOCAL_KEY",   "local_ip": "192.168.1.51", "rated_w": 1600, "essential": false, "metered": true },
-    { "role": "air_con",    "label": "Air-Con",             "device_id": "YOUR_AIRCON_DEVICE_ID", "local_key": "YOUR_AC_LOCAL_KEY",   "local_ip": "192.168.1.52", "rated_w": 2000, "essential": false, "metered": true },
-    { "role": "inside_temp","label": "Inside-temp sensor",  "device_id": "YOUR_INSIDE_DEVICE_ID", "local_key": "YOUR_INSIDE_LOCAL_KEY","local_ip": "192.168.1.53", "rated_w": 0,    "essential": false, "metered": false },
-    { "role": "well_pump",  "label": "Well pump",           "device_id": "",                      "local_key": "YOUR_WELLPUMP_LOCAL_KEY","local_ip": "192.168.1.54","rated_w": 0,  "essential": true,  "metered": false }
+    {
+      "role": "hot_water",
+      "label": "Hot Water",
+      "device_id": "YOUR_HW_DEVICE_ID",
+      "local_key": "YOUR_HW_LOCAL_KEY",
+      "local_ip": "192.168.1.51",
+      "rated_w": 1600,
+      "essential": false,
+      "metered": true
+    },
+    {
+      "role": "air_con",
+      "label": "Air-Con",
+      "device_id": "YOUR_AIRCON_DEVICE_ID",
+      "local_key": "YOUR_AC_LOCAL_KEY",
+      "local_ip": "192.168.1.52",
+      "rated_w": 2000,
+      "essential": false,
+      "metered": true
+    },
+    {
+      "role": "inside_temp",
+      "label": "Inside-temp sensor",
+      "device_id": "YOUR_INSIDE_DEVICE_ID",
+      "local_key": "YOUR_INSIDE_LOCAL_KEY",
+      "local_ip": "192.168.1.53",
+      "rated_w": 0,
+      "essential": false,
+      "metered": false
+    },
+    {
+      "role": "well_pump",
+      "label": "Well pump",
+      "device_id": "",
+      "local_key": "YOUR_WELLPUMP_LOCAL_KEY",
+      "local_ip": "192.168.1.54",
+      "rated_w": 0,
+      "essential": true,
+      "metered": false
+    }
   ],
   "_loads": "One entry per Tuya plug, ANY count (0–N). Delete the ones you don't have; add more by copying a block. role: hot_water | air_con | inside_temp | well_pump (or any label for extra switched loads — only the four named roles wire into the dispatcher/flow today). device_id from the Tuya portal; local_key+local_ip from `tinytuya wizard` (install/tuya-walkthrough.md §8). rated_w = nameplate watts (used as the metering fallback when the plug isn't reporting live power). essential=true marks a load that shouldn't be treated as discretionary surplus. metered=true = show its live watts on the dashboard.",
-
   "dispatcher": {
     "surplus_on_w": 1800,
     "surplus_off_w": 1200,
@@ -70,11 +154,25 @@
     "sustain_off_ms": 60000,
     "sustain_off_ms_curt": 180000,
     "soc_windows": {
-      "w1": { "on": 80, "off": 75 },
-      "w2": { "on": 90, "off": 85 },
-      "w3": { "on": 99, "off": 98 }
+      "w1": {
+        "on": 80,
+        "off": 75
+      },
+      "w2": {
+        "on": 90,
+        "off": 85
+      },
+      "w3": {
+        "on": 99,
+        "off": 98
+      }
     },
-    "ac": { "mode": "heating", "inside_temp_on_c": 19, "inside_temp_off_c": 22, "inside_temp_source": "tuya_plug" },
+    "ac": {
+      "mode": "heating",
+      "inside_temp_on_c": 19,
+      "inside_temp_off_c": 22,
+      "inside_temp_source": "tuya_plug"
+    },
     "_surplus": "surplus_on_w / surplus_off_w = the watts of genuine surplus to turn a load ON / OFF (hysteresis; ON > OFF). surplus_off_w_curt = the lower OFF threshold used while panels are confirmed curtailed. Tune to your array: bigger array → bigger numbers.",
     "_curtail_fronius_w": "Below this Fronius output (W) the inverter is treated as frequency-shift throttled (a curtailment signal). 50 suits a small AC-coupled Fronius; set higher for a bigger one.",
     "_caps": "load_cap_w = the most a switched load may add on top of house load (e.g. a circuit/trailer limit). safety_cap_w = hard cascade-trip ceiling (must be ≥ load_cap_w). VERY install-specific — set to YOUR wiring limits.",
@@ -83,14 +181,12 @@
     "_soc_windows": "Time-of-day battery SOC gates (on/off %, ON>OFF). W1 (early), W2 (midday), W3 (afternoon) progressively demand a fuller battery before dispatching, so loads run on genuine surplus. Defaults suit lead-acid (keep SOC high). For lithium you can lower these to cycle more.",
     "_ac": "mode: 'heating' (fire when cold, ON<OFF — what ships) or 'cooling' (fire when hot, ON>OFF). NOTE: choosing 'cooling' flips the dashboard labels + setpoint sense, but the dispatcher's temperature COMPARISON ships in heating mode — true cooling-direction dispatch is a documented manual step (see install/troubleshooting.md → 'Summer cooling'), deliberately not auto-applied to the safety logic. inside_temp_on_c/off_c are the heating setpoints (also tunable live from the dashboard). inside_temp_source: tuya_plug | external | disabled."
   },
-
   "display": {
     "currency": "AUD",
     "currency_symbol": "$",
     "price_per_kwh": 0.0,
     "_display": "currency/symbol + your electricity price per kWh (for cost readouts). price_per_kwh 0 = hide cost figures."
   },
-
   "dashboard": {
     "tip_after_days": 30,
     "tip_url": "https://ko-fi.com/banksiaspringsfarm",

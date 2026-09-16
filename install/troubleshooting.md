@@ -76,9 +76,11 @@ Smart Life / Tuya Smart app and the correct DC.
 
 ## Install / runtime issues (non-Tuya)
 
-### Cerbo Node-RED unreachable
+### Cerbo (or Pi) Node-RED unreachable
 
-`deploy.py` can't reach Node-RED on the Cerbo.
+`deploy.py` can't reach Node-RED at `hardware.nodered_url` (default: the Cerbo on :1881, or
+`http://127.0.0.1:1880` for a Selectronic/Pi install — so run deploy.py on the Pi, or set the
+URL to `http://<pi-ip>:1880`).
 
 - **Wrong `cerbo_ip`** in `config.json` — confirm the Cerbo's IP.
 - **Not on the same LAN** — the machine running `deploy.py` must be on the same network as the
@@ -89,6 +91,28 @@ Smart Life / Tuya Smart app and the correct DC.
   push the flow. In that case, **manually import** the generated flow:
   in the Node-RED editor → **menu → Import** → load
   **`.build/bsf-solar-dispatch.deployed.flow.json`** → **Deploy**.
+
+### Select.live bridge (Selectronic installs)
+
+`mosquitto_sub -h 127.0.0.1 -t 'sel/#' -v` on the Pi shows what the dispatcher sees.
+
+- **Nothing at all** — the bridge service isn't running: `systemctl --user status
+  farm.bsf.solar-dispatch-starter-selectlive`. Run it by hand to see why:
+  `BSF_CONFIG=~/bsf-solar-dispatch/config.json python3 ~/bsf-solar-dispatch/selectlive_bridge.py --once`.
+- **`sel/bridge` says `ok:false`** — the Select.live box isn't answering. Open
+  `http://<ip>/cgi-bin/solarmonweb/devices/` in a browser on the same network: it must list a
+  device with a 32-hex id, and `…/devices/<id>/point` must return JSON. Wrong `device_id` or a
+  box on a different subnet are the usual causes. The box is discontinued but the local
+  endpoint keeps working; no login is needed on the LAN.
+- **`sel/batt_power` has the wrong sign** (negative while the sun's charging) — set
+  `hardware.selectronic.invert_battery_sign: true` and redeploy the publisher.
+- **`sel/pv_dc` is always 0** — normal when solar is AC-coupled (it then shows in
+  `sel/pv_fronius`). Only a DC-coupled MPPT through the SP PRO's shunt shows here.
+- **Curtailment never asserts (`sel/mode_288` stays 2)** — it's inferred: SOC ≥
+  `curtail_soc_pct` (95) AND |battery W| ≤ `curtail_batt_w` (300) AND solar ≥
+  `curtail_min_pv_w` (400). Watch a real full-battery midday and lower `curtail_soc_pct` to what
+  the SP PRO actually floats at (some sit at 93–94 %). Wrong-way errors are safe: "not
+  curtailed" only makes the dispatcher wait for plain surplus.
 
 ### Publisher service not writing `state.json`
 

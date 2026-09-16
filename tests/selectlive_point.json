@@ -1,0 +1,15 @@
+{
+  "device": {"name": "SP PRO"},
+  "item_count": 24,
+  "items": {
+    "battery_in_wh_today": 6.41, "battery_in_wh_total": 5123.9,
+    "battery_out_wh_today": 3.02, "battery_out_wh_total": 4890.1,
+    "battery_soc": 97.5, "battery_w": 120,
+    "fault_code": 0, "fault_ts": 0, "gen_status": 0,
+    "grid_in_wh_today": 0, "grid_in_wh_total": 0, "grid_out_wh_today": 0, "grid_out_wh_total": 0, "grid_w": 0,
+    "load_w": 850, "load_wh_today": 9.8, "load_wh_total": 21044.2,
+    "shunt_w": 0,
+    "solar_wh_today": 14.3, "solar_wh_total": 30211.7, "solarinverter_w": 1010,
+    "timestamp": 1789600000
+  }
+}

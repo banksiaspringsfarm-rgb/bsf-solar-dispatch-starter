@@ -12,7 +12,7 @@ Stdlib only. Reads ONE config.json (see config.example.json) and:
 Subcommands:  check · flow · dashboard · publisher · widget · smoke · all
 Flags:  --target DIR · --deploy · --dry-run · --no-start · --force
 """
-import argparse, json, os, ssl, sys, subprocess, shutil, urllib.request, time, platform, tempfile
+import re, argparse, json, os, ssl, sys, subprocess, shutil, urllib.request, time, platform, tempfile
 
 HERE     = os.path.dirname(os.path.abspath(__file__))
 ROOT     = os.path.dirname(HERE)
@@ -82,7 +82,7 @@ def token_map(cfg):
     def lf(role, field): return ((L.get(role) or {}).get(field) or "")
     w=lambda win,side: _num((sw.get(win) or {}).get(side), DISP_DEFAULTS[f"__DISP_{win.upper()}_SOC_{side.upper()}__"])
     m = {
-      "__CERBO_IP__": H.get("cerbo_ip") or "192.168.1.50",
+      "__CERBO_IP__": (_g(H,"selectronic.mqtt_host") or "127.0.0.1") if _inverter_kind(cfg)=="selectronic" else (H.get("cerbo_ip") or "192.168.1.50"),
       "__VRM_PORTAL_ID__": H.get("vrm_portal_id") or "",
       "__TUYA_ACCESS_ID__": T.get("access_id") or "",
       "__TUYA_ACCESS_SECRET__": T.get("access_secret") or "",
@@ -150,37 +150,91 @@ def validate(cfg):
     elif _num(ac.get("inside_temp_on_c"),19)>=_num(ac.get("inside_temp_off_c"),22):
         issues.append("heating mode: dispatcher.ac.inside_temp_on_c must be < inside_temp_off_c.")
     if not (cfg.get("loads") or []): warns.append("no loads defined — nothing to dispatch (publisher/dashboard still run).")
+    kind=_inverter_kind(cfg)
+    if kind not in ("victron","selectronic"): issues.append(f"hardware.inverter.kind '{kind}' — must be 'victron' or 'selectronic'.")
+    if kind=="selectronic":
+        if not (_g(cfg,"hardware.selectronic.ip") and _g(cfg,"hardware.selectronic.device_id")):
+            warns.append("selectronic: hardware.selectronic.ip / device_id not set — the bridge has nothing to poll (find the id at http://<ip>/cgi-bin/solarmonweb/devices/).")
+        if _g(cfg,"hardware.fronius.present") is False and _num(_g(cfg,"hardware.selectronic.curtail_min_pv_w"),0)>0:
+            warns.append("selectronic: no AC-coupled inverter and no shunt → the bridge cannot see solar; curtailment will never assert.")
+        warns.append("selectronic: curtailment is SYNTHESISED (SOC/battery-W/solar heuristic) — confirm the three curtail_* knobs against a real full-battery midday.")
     return issues, warns
 
 # ---- check --------------------------------------------------------------------
 def cmd_check(cfg, args):
     step("Validating config.json")
     issues,warns = validate(cfg)
-    cerbo=_g(cfg,"hardware.cerbo_ip","")
-    (warn if (not cerbo or cerbo.endswith(".50")) else ok)(f"cerbo_ip = {cerbo or '(unset)'}")
+    kind=_inverter_kind(cfg); base=_nodered_url(cfg)
+    if kind=="selectronic":
+        sip=_g(cfg,"hardware.selectronic.ip",""); ok(f"inverter = Selectronic SP PRO via Select.live {sip or '(ip unset)'} → MQTT {_g(cfg,'hardware.selectronic.mqtt_host') or '127.0.0.1'}")
+    else:
+        cerbo=_g(cfg,"hardware.cerbo_ip","")
+        (warn if (not cerbo or cerbo.endswith(".50")) else ok)(f"cerbo_ip = {cerbo or '(unset)'}")
     dpct,wpct,chem=soc_bands(cfg); ok(f"battery = {chem} (SOC red <= {dpct}%, amber < {wpct}%)")
     nplugs=len(cfg.get("loads") or []); ok(f"{nplugs} load(s) configured")
     if _g(cfg,"tuya.access_id","").startswith("YOUR_"): warn("Tuya access_id not set (Tuya features idle).")
     for w_ in warns: warn(w_)
     for i in issues: err(i)
-    step("Reaching the Cerbo Node-RED admin API")
-    try: ok(f"Cerbo {cerbo}:1881 reachable (flow rev {_flow_rev(cerbo)}).")
-    except Exception as e: warn(f"Cerbo {cerbo}:1881 not reachable ({e.__class__.__name__}); stage files now, deploy when online.")
+    step(f"Reaching the Node-RED admin API at {base}")
+    try: ok(f"Node-RED {base} reachable (flow rev {_flow_rev(base)}).")
+    except Exception as e: warn(f"Node-RED {base} not reachable ({e.__class__.__name__}); stage files now, deploy when online.")
     print(); (err if issues else ok)(f"check complete — {len(issues)} blocker(s), {len(warns)} warning(s).")
     return len(issues)
 
 # ---- flow ---------------------------------------------------------------------
-def _flow_rev(cerbo):
-    req=urllib.request.Request(f"https://{cerbo}:1881/flows", headers={"Node-RED-API-Version":"v2"})
-    with urllib.request.urlopen(req, timeout=8, context=_ssl_unverified()) as r:
+def _flow_rev(base):
+    req=urllib.request.Request(f"{base}/flows", headers={"Node-RED-API-Version":"v2"})
+    with urllib.request.urlopen(req, timeout=8, context=_ssl_unverified() if base.startswith("https") else None) as r:
         return json.loads(r.read().decode()).get("rev")
+
+
+def _inverter_kind(cfg):
+    return (_g(cfg,"hardware.inverter.kind") or "victron").strip().lower()
+
+def _nodered_url(cfg):
+    u=(_g(cfg,"hardware.nodered_url") or "").strip().rstrip("/")
+    if u: return u
+    if _inverter_kind(cfg)=="selectronic": return "http://127.0.0.1:1880"
+    return "https://%s:1881" % (_g(cfg,"hardware.cerbo_ip","") or "")
+
+# Victron input node name -> Select.live bridge topic suffix (see publisher/selectlive_bridge.py).
+_SEL_TOPIC_BY_NAME = {
+    "Battery SOC":"soc", "soc":"soc", "pv_dc":"pv_dc", "pv_fronius":"pv_fronius",
+    "ac_load":"ac_load", "batt_power":"batt_power",
+    "mode:mode_288":"mode_288", "mode:mode_289":"mode_289", "mode:mode_rs1":"mode_rs1", "mode:mode_rs2":"mode_rs2",
+}
+def selectronic_transform(flows, prefix="sel"):
+    """Replace every victron-input-* node with an `mqtt in` node on the same wires,
+    fed by the Select.live bridge. Nodes with no bridge topic (per-MPPT probes) become
+    mqtt-ins on a topic the bridge never publishes: the dispatcher treats them as
+    'no data' (documented: both-null = don't trust), which is the safe branch.
+    The victron-client config node is dropped (the palette isn't installed on a Pi)."""
+    broker=next((n["id"] for n in flows if n.get("type")=="mqtt-broker"), None)
+    if not broker: raise RuntimeError("flow has no mqtt-broker node to attach Select.live inputs to")
+    out=[]; swapped=[]
+    for n in flows:
+        t=n.get("type","")
+        if t=="victron-client": continue
+        if t.startswith("victron-input"):
+            nm=n.get("name") or n["id"]
+            suffix=_SEL_TOPIC_BY_NAME.get(nm) or re.sub(r"[^a-z0-9_]+","_",nm.lower())
+            out.append({"id":n["id"],"type":"mqtt in","z":n.get("z"),"name":nm,
+                        "topic":"%s/%s"%(prefix,suffix),"qos":"0","datatype":"json","broker":broker,
+                        "nl":False,"rap":True,"rh":0,"inputs":0,"x":n.get("x",100),"y":n.get("y",100),
+                        "wires":n.get("wires",[])})
+            swapped.append((nm,"%s/%s"%(prefix,suffix)))
+        else: out.append(n)
+    return out, swapped
 
 def build_flow(cfg):
     raw=open(SRC_FLOW).read()
     tm=token_map(cfg)
     for tok,val in tm.items(): raw=raw.replace(tok, str(val))
-    leftover=sorted(set(__import__("re").findall(r"__[A-Z0-9_]+__", raw)))
+    leftover=sorted(set(re.findall(r"__[A-Z0-9_]+__", raw)))
     flows=json.loads(raw)                                  # validates JSON post-substitution
+    if _inverter_kind(cfg)=="selectronic":
+        flows,swapped=selectronic_transform(flows, _g(cfg,"hardware.selectronic.topic_prefix") or "sel")
+        ok("Selectronic: swapped %d Victron input nodes for MQTT inputs (%s)" % (len(swapped), ", ".join(t for _,t in swapped[:6])+("…" if len(swapped)>6 else "")))
     out=os.path.join(ROOT,".build"); os.makedirs(out, exist_ok=True)
     dest=os.path.join(out,"bsf-solar-dispatch.deployed.flow.json")
     json.dump(flows, open(dest,"w"), indent=2)
@@ -215,18 +269,18 @@ def cmd_flow(cfg, args):
     else: ok("All function bodies pass node --check.")
     if args.dry_run or not args.deploy:
         warn("Dry-run: NOT deploying to the Cerbo. Re-run with --deploy to push it live."); return 0
-    cerbo=_g(cfg,"hardware.cerbo_ip","")
-    step(f"Deploying to Cerbo {cerbo} (type=flows — only changed tabs restart)")
+    base=_nodered_url(cfg)
+    step(f"Deploying to Node-RED at {base} (type=flows — only changed tabs restart)")
     try:
-        rev=_flow_rev(cerbo)
+        rev=_flow_rev(base)
         body=json.dumps({"flows":flows,"rev":rev}).encode()
-        req=urllib.request.Request(f"https://{cerbo}:1881/flows", data=body, method="POST",
+        req=urllib.request.Request(f"{base}/flows", data=body, method="POST",
             headers={"Content-Type":"application/json","Node-RED-API-Version":"v2","Node-RED-Deployment-Type":"flows"})
-        with urllib.request.urlopen(req, timeout=15, context=_ssl_unverified()) as r:
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_unverified() if base.startswith("https") else None) as r:
             ok(f"Deployed. rev {rev} → {json.loads(r.read().decode()).get('rev')}")
     except Exception as e:
         err(f"Deploy failed: {e}")
-        print("    Cerbo offline, or Node-RED admin auth on (open https://%s:1881). Paste the error into Claude Code." % cerbo)
+        print("    Node-RED offline, or admin auth on (open %s). Paste the error into Claude Code." % base)
         return 1
     return 0
 
@@ -269,6 +323,8 @@ def cmd_publisher(cfg, args):
     os.makedirs(tgt, exist_ok=True)
     data_dir=_g(cfg,"out_dir") or os.path.join(tgt,"dispatch-host"); os.makedirs(data_dir, exist_ok=True)
     shutil.copy2(SRC_PUB, os.path.join(tgt,"solar_state_publisher.py"))
+    sel = _inverter_kind(cfg)=="selectronic"
+    if sel: shutil.copy2(os.path.join(os.path.dirname(SRC_PUB),"selectlive_bridge.py"), os.path.join(tgt,"selectlive_bridge.py"))
     shutil.copy2(os.path.join(DASH_DIR,"solar_dispatch_dashboard.html"), os.path.join(data_dir,"solar_dispatch_dashboard.html"))
     dcfg=os.path.join(DASH_DIR,"dashboard-config.js")
     if os.path.exists(dcfg): shutil.copy2(dcfg, os.path.join(data_dir,"dashboard-config.js"))
@@ -293,11 +349,16 @@ def cmd_publisher(cfg, args):
         else:
             _write_systemd(unit, py, os.path.join(tgt,"solar_state_publisher.py"), cfg_dest, tgt)
             ok(f"Wrote systemd unit → {unit}")
+            if sel:
+                bunit=os.path.expanduser(f"~/.config/systemd/user/{LABEL}-selectlive.service")
+                _write_systemd(bunit, py, os.path.join(tgt,"selectlive_bridge.py"), cfg_dest, tgt, "Select.live -> MQTT bridge")
+                ok(f"Wrote systemd unit → {bunit}")
             if args.no_start: warn(f"--no-start: enable later: systemctl --user enable --now {LABEL}")
             else:
                 subprocess.run(["systemctl","--user","daemon-reload"])
-                r=subprocess.run(["systemctl","--user","enable","--now",LABEL], capture_output=True, text=True)
-                (ok if r.returncode==0 else warn)(f"systemctl enable --now rc={r.returncode} {r.stderr.strip()}")
+                for svc in ([LABEL, LABEL+"-selectlive"] if sel else [LABEL]):
+                    r=subprocess.run(["systemctl","--user","enable","--now",svc], capture_output=True, text=True)
+                    (ok if r.returncode==0 else warn)(f"systemctl enable --now {svc} rc={r.returncode} {r.stderr.strip()}")
     else:
         warn(f"OS '{sysname}': run manually:  BSF_CONFIG={cfg_dest} {py} {os.path.join(tgt,'solar_state_publisher.py')}")
     print(f"\n  Dashboard served from: {data_dir}\n  Quick static server:  cd {data_dir} && {py} -m http.server 8780")
@@ -309,9 +370,9 @@ def _write_plist(path, py, script, cfg, wd):
         "WorkingDirectory":wd,"RunAtLoad":True,"KeepAlive":True,
         "StandardOutPath":"/tmp/bsf-solar-dispatch.log","StandardErrorPath":"/tmp/bsf-solar-dispatch.err"}, open(path,"wb"))
 
-def _write_systemd(path, py, script, cfg, wd):
+def _write_systemd(path, py, script, cfg, wd, desc="publisher (read-only relay)"):
     open(path,"w").write(f"""[Unit]
-Description=BSF Solar Dispatch publisher (read-only relay)
+Description=BSF Solar Dispatch {desc}
 After=network-online.target
 
 [Service]

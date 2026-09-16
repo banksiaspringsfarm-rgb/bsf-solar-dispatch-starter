@@ -1,0 +1,28 @@
+#cloud-config
+hostname: __HOSTNAME__
+manage_etc_hosts: true
+timezone: Australia/Brisbane
+users:
+- name: bsf
+  groups: users,adm,dialout,audio,netdev,video,plugdev,sudo,gpio,i2c,spi
+  shell: /bin/bash
+  lock_passwd: false
+  passwd: "__SHA512_CRYPT_HASH__"
+  ssh_authorized_keys:
+  - "__YOUR_SSH_PUBLIC_KEY__"
+  sudo: ALL=(ALL) NOPASSWD:ALL
+ssh_pwauth: true
+enable_ssh: true
+package_update: true
+packages:
+- git
+- mosquitto
+- mosquitto-clients
+- python3-pip
+- python3-venv
+- curl
+runcmd:
+- [sh, -c, "curl -fsSL https://tailscale.com/install.sh | sh"]
+- [systemctl, enable, --now, mosquitto]
+- [sh, -c, "echo 'listener 1883\nallow_anonymous true' > /etc/mosquitto/conf.d/lan.conf && systemctl restart mosquitto"]
+- [sh, -c, "touch /home/bsf/FIRSTBOOT_DONE && chown bsf:bsf /home/bsf/FIRSTBOOT_DONE"]
