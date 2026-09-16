@@ -7,14 +7,19 @@ For a **Victron** install the same Pi just hosts the relay + dashboard (the flow
 Cerbo) — the steps below still apply, skip nothing.
 
 Tested on a **Raspberry Pi 5 (1 GB)** with Raspberry Pi OS Lite 64-bit (Trixie, 2026-09-15).
-A Pi 4 works the same. Works from a USB stick, but a USB 2.0 stick makes the first boot and
-the Node-RED install crawl (20–40 min); an SD card or NVMe is much better for the long term.
+A Pi 4 works the same. **Use an SD card or NVMe, not a USB stick.** A USB 2.0 stick was tried
+first: writes at ~140 kB/s, the Node-RED install took 40 min, the Pi then rebooted itself and
+every file written in the previous minutes came back zero-length (repo, Tailscale state,
+Node-RED's node_modules). Flashing an SD card took the whole build from hours to minutes.
 
 ## 1. Flash the image with the first-boot config baked in
 
 Files in `install/pi/`: `user-data.example`, `network-config`, `meta-data.example`. They are
 cloud-init; Raspberry Pi OS reads them from the boot partition on first boot and sets the
-hostname, a user with your SSH key, then installs Mosquitto, Python, git and Tailscale.
+hostname, a user with your SSH key, then installs Mosquitto, Python, git, Tailscale, Node.js 22 +
+Node-RED (+ the Tuya palette node, service enabled), clones this repo and builds its Python
+venv. Step 4 below is therefore already done when `~/FIRSTBOOT_DONE` appears — it's kept for
+repairing a box by hand.
 
 1. Download Raspberry Pi OS Lite (64-bit) `.img.xz` from raspberrypi.com and verify the sha256.
 2. Copy `user-data.example` → `user-data`, `meta-data.example` → `meta-data` and fill in:
