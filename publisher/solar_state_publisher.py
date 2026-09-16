@@ -52,8 +52,13 @@ _LOADS = {l.get("role"): l for l in (_CFG.get("loads") or []) if isinstance(l, d
 def _load_dev(role):  # device_id for a given plug role ("" if absent)
     return (_LOADS.get(role) or {}).get("device_id", "") or ""
 
-BROKER_HOST = _HW.get("cerbo_ip", "YOUR_CERBO_IP")
-BROKER_PORT = int(_HW.get("mqtt_port", 1883) or 1883)
+_INVERTER_KIND = ((_HW.get("inverter") or {}).get("kind") or "victron").strip().lower()
+_SEL = _HW.get("selectronic") if isinstance(_HW.get("selectronic"), dict) else {}
+# Selectronic/Pi installs: the broker + Node-RED are the Pi itself, not a Cerbo.
+BROKER_HOST = (_SEL.get("mqtt_host") or "127.0.0.1") if _INVERTER_KIND == "selectronic" else _HW.get("cerbo_ip", "YOUR_CERBO_IP")
+BROKER_PORT = int(_SEL.get("mqtt_port") or _HW.get("mqtt_port", 1883) or 1883)
+NODERED_BASE = ((_HW.get("nodered_url") or "").rstrip("/")
+                or ("http://127.0.0.1:1880" if _INVERTER_KIND == "selectronic" else "https://%s:1881" % BROKER_HOST))
 OUT_DIR     = _CFG.get("out_dir") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "dispatch-host")
 STATE_FILE  = os.path.join(OUT_DIR, "state.json")
@@ -465,7 +470,7 @@ def pick(payload, allow):
 # The inside-temperature gate is fed by a Tuya CLOUD poll straight into Node-RED
 # flow context (it never publishes on MQTT). Read it from the admin context API
 # so the dashboard's temp gate shows the real value instead of "feed missing".
-_CTX_URL = "https://%s:1881/context/flow/acv15.tab" % BROKER_HOST
+_CTX_URL = "%s/context/flow/acv15.tab" % NODERED_BASE
 _SSL = ssl.create_default_context()
 _SSL.check_hostname = False
 _SSL.verify_mode = ssl.CERT_NONE
@@ -479,7 +484,7 @@ INSIDE_STALE_MS = 10 * 60 * 1000       # matches dispatcher's 10-min fail-closed
 # the same Node-RED flow-context API used for inside_temp above. This is DISPLAY-
 # ONLY: no dispatcher edit, no MQTT publish — we only read a cache the dispatcher
 # already keeps, so ac_load / pv_total / surplus_now math is untouched.
-_AGG_URL = "https://%s:1881/context/flow/hwv3.tab" % BROKER_HOST
+_AGG_URL = "%s/context/flow/hwv3.tab" % NODERED_BASE
 _pv_cache = {"pv_dc": None, "pv_dc_ts": 0, "pv_fronius": None, "pv_fronius_ts": 0}
 PV_STALE_MS = 5 * 60 * 1000            # fail-closed: drop a PV split value older than this
 
