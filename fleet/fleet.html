@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Solar Fleet</title>
+<style>
+  :root{--bg:#0b1020;--card:#131a2e;--line:#232c47;--fg:#e8ecf7;--dim:#8b96b5;--ok:#38d39f;--warn:#f5b840;--bad:#ff6b6b;--sun:#ffd166;--blue:#6ea8ff}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
+  header{display:flex;align-items:baseline;justify-content:space-between;padding:calc(14px + env(safe-area-inset-top)) 16px 6px}
+  h1{font-size:18px;margin:0;font-weight:700}
+  h1 span{color:var(--dim);font-weight:500;font-size:13px;margin-left:8px}
+  #upd{font-size:12px;color:var(--dim)}
+  main{padding:8px 16px calc(24px + env(safe-area-inset-bottom));display:grid;gap:12px;grid-template-columns:1fr}
+  @media(min-width:700px){main{grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}}
+  a.card{display:block;text-decoration:none;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px 12px;position:relative}
+  a.card:active{transform:scale(.99)}
+  .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .name{font-size:17px;font-weight:700}
+  .pill{font-size:11px;font-weight:600;letter-spacing:.3px;padding:3px 9px;border-radius:999px;border:1px solid}
+  .ok .pill{color:var(--ok);border-color:var(--ok)}
+  .lagging .pill{color:var(--warn);border-color:var(--warn)}
+  .offline .pill{color:var(--bad);border-color:var(--bad)}
+  .offline .grid,.offline .foot{opacity:.35}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 10px}
+  .m{min-width:0}
+  .m b{display:block;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .m b small{font-size:12px;font-weight:500;color:var(--dim);margin-left:2px}
+  .m i{display:block;font-style:normal;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+  .soc b{color:var(--ok)} .soc.warn b{color:var(--warn)} .soc.bad b{color:var(--bad)}
+  .pv b{color:var(--sun)} .batt b.chg{color:var(--ok)} .batt b.dis{color:var(--blue)}
+  .foot{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:12.5px;color:var(--dim)}
+  .foot em{font-style:normal;color:var(--fg)}
+  .on{color:var(--ok)!important} .curt{color:var(--sun)}
+  .err{font-size:12px;color:var(--bad);margin-top:8px}
+  .empty{color:var(--dim);padding:40px 0;text-align:center}
+</style>
+</head>
+<body>
+<header><h1>Solar Fleet<span id="n"></span></h1><div id="upd">loading…</div></header>
+<main id="cards"><div class="empty">Waiting for fleet.json…</div></main>
+<script>
+(function(){
+  var SOC_WARN = 75, SOC_BAD = 60;   // lead-acid bands; sites can override later via fleet.json
+  function fmtW(w){ if(w==null) return '—'; var a=Math.abs(w); return a>=1000 ? (a/1000).toFixed(a>=10000?0:1)+'<small>kW</small>' : Math.round(a)+'<small>W</small>'; }
+  function ago(s){ if(s==null) return '—'; if(s<60) return Math.round(s)+' s'; if(s<3600) return Math.round(s/60)+' min'; return (s/3600).toFixed(1)+' h'; }
+  function esc(t){ return String(t==null?'':t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function card(s){
+    var socCls = s.soc==null?'':(s.soc<SOC_BAD?' bad':(s.soc<SOC_WARN?' warn':''));
+    var battDir = s.batt_w==null?'':(s.batt_w>25?'chg':(s.batt_w<-25?'dis':''));
+    var battLbl = battDir==='chg'?'charging':(battDir==='dis'?'discharging':'battery');
+    var pill = s.state==='ok'?'LIVE':(s.state==='lagging'?'LAGGING':'OFFLINE');
+    var hw = s.hw_state==null?'—':s.hw_state; var ac = s.ac_state==null?'—':s.ac_state;
+    var href = s.dashboard_url||'#';
+    return '<a class="card '+s.state+'" href="'+esc(href)+'">'
+      +'<div class="top"><div class="name">'+esc(s.name)+'</div><div class="pill">'+pill+'</div></div>'
+      +'<div class="grid">'
+      +'<div class="m soc'+socCls+'"><b>'+(s.soc==null?'—':Math.round(s.soc)+'<small>%</small>')+'</b><i>battery</i></div>'
+      +'<div class="m pv"><b>'+fmtW(s.pv_w)+'</b><i>solar'+(s.curtailed?' <span class="curt">· curtailed</span>':'')+'</i></div>'
+      +'<div class="m"><b>'+fmtW(s.load_w)+'</b><i>house load</i></div>'
+      +'<div class="m batt"><b class="'+battDir+'">'+(s.batt_w==null?'—':(s.batt_w>25?'+':(s.batt_w<-25?'−':''))+fmtW(s.batt_w))+'</b><i>'+battLbl+'</i></div>'
+      +'<div class="m"><b class="'+(hw==='on'?'on':'')+'">'+esc(hw)+'</b><i>hot water</i></div>'
+      +'<div class="m"><b class="'+(ac==='on'?'on':'')+'">'+esc(ac)+(s.ac_mode?'<small>'+esc(s.ac_mode)+'</small>':'')+'</b><i>air-con</i></div>'
+      +'</div>'
+      +'<div class="foot"><span>today <em>'+(s.today_hw_kwh==null?'—':s.today_hw_kwh.toFixed(1))+' kWh</em> hot water</span>'
+      +(s.inside_temp!=null?'<span>inside <em>'+s.inside_temp.toFixed(1)+' °C</em></span>':'')
+      +'<span>seen <em>'+ago(s.age_s)+'</em> ago</span></div>'
+      +(s.error?'<div class="err">'+esc(s.error)+'</div>':'')
+      +'</a>';
+  }
+  function render(d){
+    var el=document.getElementById('cards'); if(!d||!d.sites||!d.sites.length){ el.innerHTML='<div class="empty">No sites configured.</div>'; return; }
+    el.innerHTML=d.sites.map(card).join('');
+    var live=d.sites.filter(function(s){return s.state==='ok';}).length;
+    document.getElementById('n').textContent=live+' of '+d.sites.length+' live';
+    document.getElementById('upd').textContent='updated '+new Date(d.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+  var fails=0;
+  function poll(){
+    fetch('fleet.json',{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
+      .then(function(d){ fails=0; render(d); })
+      .catch(function(){ fails++; document.getElementById('upd').textContent='relay unreachable ('+fails+')'; });
+  }
+  poll(); setInterval(poll, 15000);
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) poll(); });
+})();
+</script>
+</body>
+</html>

@@ -109,6 +109,20 @@ answers the questions that matter. Nothing is hard-coded to one farm.
 
 ---
 
+## More than one site? The fleet page
+
+`fleet/` is a one-screen view of every system you look after — a card per site (battery, solar,
+load, what's switched on, last seen) that taps through to that site's own dashboard. A small
+relay polls each site's `state.json` over the LAN or your Tailscale tailnet and writes one
+`fleet.json` with **only** those fields (no presence, no device ids), so it's safe to serve
+wider than the per-site dashboards.
+
+```bash
+cp fleet/sites.example.json fleet/sites.json   # one entry per site: state_url + dashboard_url
+python3 fleet/fleet_relay.py                   # keep running (launchd/systemd), writes fleet/fleet.json
+cd fleet && python3 -m http.server 8790        # open http://<this-host>:8790/fleet.html
+```
+
 ## Manual install (if you'd rather)
 
 ```bash

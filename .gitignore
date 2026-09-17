@@ -36,3 +36,7 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Fleet relay: real site list + generated output
+fleet/sites.json
+fleet/fleet.json

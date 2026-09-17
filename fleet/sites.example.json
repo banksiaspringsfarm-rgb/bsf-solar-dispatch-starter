@@ -1,0 +1,10 @@
+{
+  "_comment": "Input for fleet_relay.py. One entry per site. state_url = that site's relay state.json (LAN or Tailscale name); dashboard_url = where a tap on the card goes. Copy to sites.json.",
+  "poll_s": 15,
+  "timeout_s": 6,
+  "sites": [
+    {"key": "farm", "name": "Farm", "state_url": "http://127.0.0.1:8780/state.json", "dashboard_url": "http://opens-imac:8780/solar_dispatch_dashboard.html"},
+    {"key": "dad",  "name": "Dad",  "state_url": "http://solar-pi-2:8780/state.json",   "dashboard_url": "http://solar-pi-2:8780/solar_dispatch_dashboard.html"},
+    {"key": "trish","name": "Trish","state_url": "http://solar-pi-1-1:8780/state.json", "dashboard_url": "http://solar-pi-1-1:8780/solar_dispatch_dashboard.html"}
+  ]
+}
