@@ -97,3 +97,39 @@ sudo nmcli con add type wifi ifname wlan0 con-name site-wifi ssid "THEIR-SSID" \
 nmcli -t -f SSID,SIGNAL dev wifi list             # proves the radio scans
 ```
 Save several sites' networks on one Pi if you like — it joins whichever it finds.
+
+## 7. The away view — seeing the system from outside the house
+
+At home the household opens `http://<pi>:8780/…` on their own Wi-Fi. Away from home there is nothing to reach:
+rural connections (Starlink included) sit behind carrier NAT, so port forwarding is not an option, and a VPN app on
+a relative's phone is one more thing to break. Instead each Pi publishes a **read-only** view of itself through its
+own Cloudflare Tunnel (free; needs a domain on Cloudflare). It stays independent of the installer's machine.
+
+**What the tunnel can reach:** only `dashboard_server.py --public` on `127.0.0.1:8781`, which `deploy.py publisher`
+installs on every Linux box and which is inert until a tunnel points at it. GET/HEAD only; every path lives under a
+43-character token kept in `~/bsf-solar-dispatch/public_token`; six whitelisted files; a plain 404 for everything
+else; no feedback routes; occupancy (`anyone_home`, `presence_*`, …), LAN addresses and device ids are stripped from
+every JSON file at any depth; coordinates are blurred to ~10 km; `Referrer-Policy: no-referrer` because the token is
+in the URL. The link is `https://<hostname>/<token>/`. Treat it like a key to a window, not a door: it shows, it
+cannot change anything.
+
+**Create the tunnel on YOUR machine, not the Pi** — then the Pi only ever holds its own tunnel credential, never
+account-wide access:
+```bash
+: > /tmp/empty-cf.yml
+cloudflared --config /tmp/empty-cf.yml tunnel create solar-site1
+cloudflared --config /tmp/empty-cf.yml tunnel route dns <TUNNEL-UUID> solar-site1.example.com
+```
+⚠ **Use the empty `--config` and the UUID, and read the reply.** If your `~/.cloudflared/config.yml` already pins a
+`tunnel:` (because this machine runs another tunnel), `tunnel route dns <name> <host>` silently routes the new
+hostname to THAT tunnel instead — the reply's `tunnelID=` is the only tell. Fix with `--overwrite-dns`.
+Use neutral hostnames: public hostnames end up in certificate-transparency logs.
+
+Copy `~/.cloudflared/<TUNNEL-UUID>.json` to the Pi's `~/.cloudflared/` (mode 600) and delete your copy. On the Pi:
+install `cloudflared` from `pkg.cloudflare.com`, write `~/.cloudflared/config.yml` with one ingress rule
+(`hostname` → `http://127.0.0.1:8781`) and a final `http_status:404`, and run
+`cloudflared --no-autoupdate --config ~/.cloudflared/config.yml tunnel run` as a user service (`bsf-tunnel`).
+
+**Prove it before you hand over the link:** with the token → 200; without it, with a wrong one, `/<token>/feedback.json`,
+`/<token>/../public_token`, and any POST → 404; `grep` the served `state.json` and `history.json` for `anyone_home` and
+`192.168.` → nothing; and `curl http://<pi>:8781/` from another machine must fail to connect.
