@@ -1726,6 +1726,52 @@ function fetchFirst(urls){ return urls.reduce(function(p,u){ return p.catch(func
   [['batt',c.showBattery],['diag',c.showDiag]].forEach(function(p){ var el=document.querySelector('[data-card="'+p[0]+'"]'); if(el&&!p[1]) el.style.display='none'; });
 })();
 
+/* ---- site shape: make the page describe THIS site, not the author's farm --------------------------------------
+   The page is generated from the author's own dashboard, so its wording assumes his kit: a Fronius, an air-con,
+   a metered hot-water plug. dashboard-config.js says what this site really has:
+     acSolarName  what the AC-coupled solar is ("ABB x2"); every visible "Fronius" becomes this
+     hasAirCon    false => the air-con box, card and tile are removed
+     hwConnected  false => nothing can switch the hot water yet. The dispatcher still decides when it WOULD run,
+                  which is worth seeing, but the box must never claim ON or show watts that are not being drawn.
+   Applied by an observer because the page redraws these nodes every tick; each rule is idempotent, so re-applying
+   after our own edits settles immediately instead of looping. */
+(function siteShape(){ var c=window.BSF_CONFIG||{};
+  var name=(typeof c.acSolarName==='string'&&c.acSolarName&&c.acSolarName!=='Fronius')?c.acSolarName:null;
+  var noAc=c.hasAirCon===false, noHw=c.hwConnected===false;
+  if(!name&&!noAc&&!noHw) return;
+  function byId(i){ return document.getElementById(i); }
+  function hide(el){ if(el&&el.style.display!=='none') el.style.display='none'; }
+  function txt(el,t){ if(el&&el.textContent!==t) el.textContent=t; }
+  function rename(root){
+    var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), n, list=[];
+    while((n=w.nextNode())){ var p=n.parentNode&&n.parentNode.nodeName; if(p==='SCRIPT'||p==='STYLE') continue; if(n.nodeValue.indexOf('Fronius')>=0||n.nodeValue.indexOf('FRONIUS')>=0) list.push(n); }
+    list.forEach(function(n){ n.nodeValue=n.nodeValue.replace(/Fronius/g,name).replace(/FRONIUS/g,name.toUpperCase()); });
+  }
+  function apply(){
+    if(name) rename(document.body);
+    if(noAc){
+      ['load_ac','d_ac','b_ac','d_ac_today','p_ac','c_sur_ac'].forEach(function(i){ hide(byId(i)); });
+      [].forEach.call(document.querySelectorAll('svg text.node-label'),function(t){ if(/Air-con/i.test(t.textContent)) hide(t); });
+      [].forEach.call(document.querySelectorAll('rect.node-tap'),function(r){ if(/openDetail\('ac'\)/.test(r.getAttribute('onclick')||'')) hide(r); });
+      hide(document.querySelector('[data-card="ac"]'));
+      var wk=byId('wk_ac'); if(wk){ var tile=wk.closest?wk.closest('.metric'):null; hide(tile); }
+    }
+    if(noHw){
+      var would=false; try{ would=!!(typeof state!=='undefined'&&state&&state.hw&&state.hw.hwState==='on'); }catch(e){}
+      txt(byId('d_hw'), 'not connected');
+      txt(byId('b_hw'), would?'WOULD RUN':'WAITING');
+      txt(byId('d_hw_today'), would?'surplus is there now':'no switch fitted yet');
+      var box=byId('load_hw'); if(box&&box.classList.contains('on')) box.classList.remove('on');
+      var pt=byId('p_hw'); if(pt&&pt.classList.contains('on')) pt.classList.remove('on');
+    }
+  }
+  var busy=false;
+  function run(){ if(busy) return; busy=true; try{ apply(); }finally{ busy=false; } }
+  run();
+  try{ new MutationObserver(run).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']}); }catch(e){}
+  setInterval(run, 5000);   /* belt and braces if an observer is unavailable */
+})();
+
 /* ---- bootstrap persisted ---- */
 samples=prune(load(HKEY)); events=prune(load(EKEY));
 

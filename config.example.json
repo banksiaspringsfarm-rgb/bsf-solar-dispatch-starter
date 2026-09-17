@@ -23,9 +23,10 @@
       "present": true,
       "ip": "",
       "model": "",
-      "size_kw": 0
+      "size_kw": 0,
+      "label": ""
     },
-    "_fronius": "AC-coupled Fronius? present=false if you have none (the Fronius-curtailment signal is then ignored).",
+    "_fronius": "AC-coupled Fronius? present=false if you have none (the Fronius-curtailment signal is then ignored). label = the short name shown on the dashboard for your AC-coupled solar, e.g. 'ABB x2' (blank = 'Fronius' on a Victron site, 'AC solar' on a Selectronic one).",
     "chargers": [
       {
         "kind": "solarcharger",

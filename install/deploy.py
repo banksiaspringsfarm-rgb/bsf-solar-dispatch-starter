@@ -312,6 +312,10 @@ def cmd_dashboard(cfg, args):
       "INSIDE_ON": _num(ac.get("inside_temp_on_c"),19), "INSIDE_OFF": _num(ac.get("inside_temp_off_c"),22),
       "BATT_CAP_KWH": _g(cfg,"battery.capacity_kwh"),
       "build": _git_build(),
+      # What THIS site actually has, so the page stops describing the author's farm (see the site-shape block in the dashboard):
+      "acSolarName": (_g(cfg,"hardware.fronius.label","") or ("AC solar" if _inverter_kind(cfg)=="selectronic" else "Fronius")),
+      "hwConnected": bool((_loads_by_role(cfg).get("hot_water") or {}).get("device_id")),
+      "hasAirCon": "air_con" in _loads_by_role(cfg),
       "showBattery": bool(_g(cfg,"dashboard.show_battery_card",False)), "showDiag": bool(_g(cfg,"dashboard.show_connectivity_card",False)),
       "acLabel": (_loads_by_role(cfg).get("air_con") or {}).get("label") or "",
       "acLoadNote": _g(cfg,"display.ac_load_note","") or "",

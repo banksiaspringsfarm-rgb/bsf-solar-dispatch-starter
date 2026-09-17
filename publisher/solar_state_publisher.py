@@ -151,6 +151,12 @@ SOC_FULL_PCT    = 100                # "at 100% SOC" => surplus being spilled
 ACCUM_MAX_DT_MS = 120 * 1000         # cap per-tick integration; a longer gap = sleep/restart -> skip
 HW_FRESH_MS     = 90 * 1000          # only integrate while the HW status feed is fresh
 HW_NOMINAL_W    = int(_DISP.get("hw_element_w", 1614) or 1614)  # element draw when the plug meter is unavailable
+# A load with no device id is NOT CONNECTED: the dispatcher still runs its state machine and says "on" when it
+# WOULD switch, but nothing can happen. "Commanded on + no meter => assume the element is drawing" is a sound
+# inference only when a device exists. Without one it invents watts and kWh, and the invented watts are then
+# subtracted from the real house load. So: no device => no estimate, no energy, no subtraction.
+HW_CONNECTED    = bool(_load_dev("hot_water"))
+AC_CONNECTED    = bool(_load_dev("air_con"))
 
 weekly = {}          # "YYYY-MM-DD"(local) -> bucket of accumulators
 _accum = {"ts": 0}   # last integration wall-clock (ms); reset to 0 on restart
@@ -304,7 +310,7 @@ def _accum_into(b, dt_s, t_ms, hw, loads, chargers, live):
     acl = _wnum(hw.get("ac_load"))
     if acl is not None and acl > 0:
         b["ac_wh"] += acl * dt_h
-    if hw.get("hwState") == "on":
+    if hw.get("hwState") == "on" and HW_CONNECTED:
         b["hw_on_s"] += dt_s
         hw_w = None
         if use_plug and loads and loads.get("hot_water_metered") and loads.get("hot_water_w") is not None:
@@ -755,7 +761,7 @@ def attribute_loads(hw, ac, plugs):
     hw_estimated = False
     if hw_metered:
         hw_w, hw_sub = hw_metered_w, hw_metered_w
-    elif hw_on:
+    elif hw_on and HW_CONNECTED:
         hw_w, hw_sub, hw_estimated = HW_NOMINAL_W, HW_NOMINAL_W, True
     else:
         hw_w, hw_sub = hw_metered_w, 0       # off / never-seen: shown raw (None or 0)
@@ -763,7 +769,7 @@ def attribute_loads(hw, ac, plugs):
     ac_estimated = False
     if ac_metered:
         ac_w, ac_sub = ac_metered_w, ac_metered_w
-    elif ac_on and ac_metered_w is not None:
+    elif ac_on and ac_metered_w is not None and AC_CONNECTED:
         ac_w, ac_sub, ac_estimated = ac_metered_w, ac_metered_w, True   # hold last reported draw
     else:
         ac_w, ac_sub = ac_metered_w, 0       # off / never-seen: shown raw (None or 0)
@@ -776,12 +782,15 @@ def attribute_loads(hw, ac, plugs):
         "essential_total_w": base,            # raw lumped Cerbo bucket (shown raw)
         "essential_other_w": ess_other,       # bucket minus HW + air-con
         "hot_water_w":       hw_w,            # metered when fresh, element nominal when estimated
-        "hot_water_state":   (hwL or {}).get("state", "unknown"),
+        "hot_water_state":   (hwL or {}).get("state", "unknown") if HW_CONNECTED else "not_connected",
+        "hot_water_connected": HW_CONNECTED,  # False => no device: hwState "on" means "would run now", nothing is switching
+        "hot_water_would_run": bool(hw_on and not HW_CONNECTED),
         "hot_water_age_s":   (hwL or {}).get("age_s"),
         "hot_water_metered": hw_metered,
         "hot_water_estimated": hw_estimated,  # True => element-rating stand-in (meter stale, HW commanded on)
         "ac_w":              ac_w,            # metered when fresh, last-held draw when estimated
-        "ac_state":          (acL or {}).get("state", "unknown"),
+        "ac_state":          (acL or {}).get("state", "unknown") if AC_CONNECTED else "not_connected",
+        "ac_connected":      AC_CONNECTED,
         "ac_age_s":          (acL or {}).get("age_s"),
         "ac_metered":        ac_metered,
         "ac_estimated":      ac_estimated,    # True => held-last-draw stand-in (meter stale, A/C commanded on)
