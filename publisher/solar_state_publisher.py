@@ -279,6 +279,7 @@ def _accum_into(b, dt_s, t_ms, hw, loads, chargers, live):
     dt_h = dt_s / 3600.0
     b["span_s"] += dt_s
     soc = _wnum(hw.get("soc"))
+    if soc is not None and not (0 <= soc <= 100): soc = None   # a -1 "no reading yet" placeholder is not a SOC
     if soc is not None:
         b["soc_sum"] += soc; b["soc_n"] += 1
         b["soc_min"] = soc if b["soc_min"] is None else min(b["soc_min"], soc)
