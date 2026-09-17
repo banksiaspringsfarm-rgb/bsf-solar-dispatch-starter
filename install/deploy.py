@@ -381,6 +381,28 @@ RestartSec=5
 WantedBy=default.target
 """)
             ok(f"Wrote systemd unit → {dunit} (dashboard on :8780)")
+            # The away view: read-only, token-gated, localhost-only. Inert until a tunnel is pointed at 127.0.0.1:8781.
+            tok_path=os.path.join(tgt,"public_token")
+            if not os.path.exists(tok_path):
+                import secrets as _secrets
+                fd=os.open(tok_path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+                with os.fdopen(fd,"w") as tf: tf.write(_secrets.token_urlsafe(32)+"\n")
+                ok("Generated the away-view link token (kept in public_token, mode 600; never regenerated on re-run)")
+            punit=os.path.expanduser("~/.config/systemd/user/bsf-dashboard-public.service")
+            open(punit,"w").write(f"""[Unit]
+Description=BSF Solar Dispatch away view (read-only, token-gated, localhost only - for a tunnel)
+After=network-online.target
+
+[Service]
+WorkingDirectory={data_dir}
+ExecStart={py} {dash_srv} --dir {data_dir} --public --token-file {tok_path} --port 8781 --bind 127.0.0.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+""")
+            ok(f"Wrote systemd unit → {punit} (away view on 127.0.0.1:8781)")
             if args.no_start: warn(f"--no-start: enable later: systemctl --user enable --now {LABEL}")
             else:
                 # user services must outlive the SSH session on a headless Pi
@@ -390,7 +412,7 @@ WantedBy=default.target
                     r2=subprocess.run(["sudo","-n","loginctl","enable-linger",user], capture_output=True, text=True)
                     (ok if r2.returncode==0 else warn)("loginctl enable-linger " + ("ok — services run without a login" if r2.returncode==0 else f"failed — run: sudo loginctl enable-linger {user}"))
                 subprocess.run(["systemctl","--user","daemon-reload"])
-                for svc in ([LABEL, LABEL+"-selectlive"] if sel else [LABEL])+["bsf-dashboard-http"]:
+                for svc in ([LABEL, LABEL+"-selectlive"] if sel else [LABEL])+["bsf-dashboard-http","bsf-dashboard-public"]:
                     r=subprocess.run(["systemctl","--user","enable","--now",svc], capture_output=True, text=True)
                     subprocess.run(["systemctl","--user","restart",svc], capture_output=True)   # enable --now leaves a running unit on its OLD config
                     (ok if r.returncode==0 else warn)(f"systemctl enable + restart {svc} rc={r.returncode} {r.stderr.strip()}")
