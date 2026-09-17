@@ -22,4 +22,7 @@ hwlag=dict(snap, hw_age_s=400); check("hw feed 400 s old => lagging even if rela
 notok=dict(snap, ok=False); check("relay ok:false => offline", fleet.summarise(site,notok,now)["state"]=="offline")
 o=fleet.offline(site,"<urlopen error timed out>"); check("offline card keeps name/url, friendly error", o["state"]=="offline" and o["name"]=="X" and o["error"].startswith("no response") and o["soc"] is None)
 garbage=fleet.summarise(site,{"ok":True,"ts":"nope","hw":{"soc":"x"}},now); check("garbage => offline, no crash", garbage["state"]=="offline" and garbage["soc"] is None)
+dead=dict(snap, hw=dict(snap["hw"], stale=["soc","pv_fronius","ac_load"]))
+d=fleet.summarise(site,dead,now); check("stale inverter inputs => offline, numbers withheld", d["state"]=="offline" and d["soc"] is None and d["pv_w"] is None and "no live readings" in d["error"])
+ok_stale=dict(snap, hw=dict(snap["hw"], stale=[])); check("empty stale list => still live", fleet.summarise(site,ok_stale,now)["state"]=="ok")
 print("\n%d failure(s)"%fails); sys.exit(1 if fails else 0)

@@ -14,7 +14,7 @@ same dispatcher flow runs unchanged with `mqtt in` nodes in place of the
 Victron ones (deploy.py does that swap when hardware.inverter.kind ==
 "selectronic").
 
-Topics (all retained, numeric payload, published every poll):
+Topics (numeric payload, published every poll, NOT retained -- see pub() for why):
 
     sel/soc          battery_soc            %        (dispatcher: soc)
     sel/pv_dc        shunt_w  (DC-coupled)  W        (dispatcher: pv_dc)
@@ -131,9 +131,12 @@ def main():
         except AttributeError: client = mqtt.Client(client_id="selectlive-bridge")                    # paho 1.6
         client.connect(sel["mqtt_host"], int(sel["mqtt_port"]), 60); client.loop_start()
     pre = sel["topic_prefix"].rstrip("/")
-    def pub(suffix, payload):
+    def pub(suffix, payload, retain=False):
+        # Measurements are NEVER retained: the dispatcher stamps a reading with its ARRIVAL time, so a retained
+        # value re-delivered after a Node-RED restart would pass as fresh for the whole staleness window, however
+        # old it really is. Only the bridge-health topic is retained (it carries its own timestamp).
         s = json.dumps(payload) if isinstance(payload, (dict, list)) else repr(payload) if isinstance(payload, float) else str(payload)
-        if client: client.publish("%s/%s" % (pre, suffix), s, retain=True)
+        if client: client.publish("%s/%s" % (pre, suffix), s, retain=retain)
     print("[bridge] polling %s every %ss -> mqtt://%s:%s/%s/*" % (url or a.sample, sel["poll_s"], sel["mqtt_host"], sel["mqtt_port"], pre), flush=True)
     fails = 0
     while True:
@@ -145,12 +148,12 @@ def main():
             point_ts = num((point.get("items") or {}).get("timestamp")) if isinstance(point, dict) else None
             age = (time.time() - point_ts) if point_ts else None
             pub("raw", {"point": point, "bridge_ts": int(time.time())})
-            pub("bridge", {"ok": True, "age_s": None if age is None else round(age, 1), "ts": int(time.time())})
+            pub("bridge", {"ok": True, "age_s": None if age is None else round(age, 1), "ts": int(time.time())}, retain=True)
             fails = 0
             print("[bridge] " + " ".join("%s=%s" % (k, v) for k, v in vals.items()) + (" age=%.0fs" % age if age is not None else ""), flush=True)
         except (urllib.error.URLError, OSError, ValueError) as e:
             fails += 1
-            pub("bridge", {"ok": False, "err": str(e)[:120], "fails": fails, "ts": int(time.time())})
+            pub("bridge", {"ok": False, "err": str(e)[:120], "fails": fails, "ts": int(time.time())}, retain=True)
             print("[bridge] poll failed (%d): %s" % (fails, e), flush=True)
         if a.once: break
         time.sleep(max(1.0, float(sel["poll_s"]) - (time.time() - t0)))

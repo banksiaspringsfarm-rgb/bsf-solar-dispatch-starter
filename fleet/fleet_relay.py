@@ -36,7 +36,12 @@ def summarise(site, snap, fetched_ms):
     ts = _num(snap.get("ts"))
     age_s = round((fetched_ms - ts) / 1000.0, 1) if ts else None
     hw_age = _num(snap.get("hw_age_s"))
+    # The dispatcher lists inputs it has stopped receiving in hw.stale. A site whose core inputs are stale is
+    # showing its LAST numbers, not live ones -- say so, and do not pass the numbers off as current.
+    dead_inputs = [k for k in (hw.get("stale") or []) if k in ("soc", "pv_dc", "pv_fronius", "ac_load")]
     stale = "ok"
+    if dead_inputs:
+        return dict(offline(site, "no live readings from the inverter (%s)" % ", ".join(dead_inputs)), age_s=age_s)
     if not snap.get("ok") or age_s is None or age_s > STALE_HARD_S or (hw_age is not None and hw_age > STALE_HARD_S): stale = "offline"
     elif age_s > STALE_SOFT_S or (hw_age is not None and hw_age > STALE_SOFT_S): stale = "lagging"
     return {
