@@ -34,7 +34,7 @@ load caps, and presence-aware air-con — built and run on a working Queensland 
 Every version ships as a downloadable bundle on the [Releases page](https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases). The direct link for v1.0.0 is:
 
 ```
-https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/download/v1.0.0/bsf-solar-dispatch-starter.zip
+https://github.com/banksiaspringsfarm-rgb/bsf-solar-dispatch-starter/releases/download/v1.4.0/bsf-solar-dispatch-starter.zip
 ```
 
 ---
