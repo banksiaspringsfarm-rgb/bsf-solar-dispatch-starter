@@ -432,6 +432,7 @@ def _write_phone_setup(cfg, data_dir, token):
     away=f"{away_base}/{token}/" if away_base else ""
     chem=(_g(cfg,"battery.chemistry","lead-acid") or "").lower()
     site=(cfg.get("site_name") or "Solar")
+    site_js=json.dumps(site).replace("<", "\\u003c")     # computed OUTSIDE the f-string: no backslashes allowed in f-string expressions before Python 3.12; and '<' escaped so a name can never close the script block
     apk_src=os.path.join(ROOT,"widget","android","solar-dispatch-widget.apk"); have_apk=os.path.exists(apk_src)
     if have_apk: shutil.copy2(apk_src, os.path.join(data_dir,"solar-dispatch-widget.apk"))
     page=f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -444,7 +445,7 @@ a.btn{{display:block;text-align:center;text-decoration:none;font-weight:700;bord
 <ol><li><b>Install the app</b>{'<a class="btn dl" href="solar-dispatch-widget.apk">Download Solar Dispatch</a><small>Open the download and allow the install when Android asks.</small>' if have_apk else '<small>The app file is not on this box yet. Get it from the project&#39;s Releases page.</small>'}</li>
 <li><b>Fill it in with one tap</b><a class="btn go" id="go" href="#">Set up this phone</a><small>The app opens already filled in. Press Test, then Save.</small></li>
 <li><b>Add the widget</b><small>Long-press the home screen \u2192 Widgets \u2192 Solar Dispatch.</small></li></ol>
-<script>(function(){{var q='name='+encodeURIComponent({json.dumps(site).replace('<','\\u003c')})+'&home='+encodeURIComponent(location.origin)+{json.dumps('&away='+__import__('urllib.parse').parse.quote(away,safe='') if away else '')}+'&lithium={'1' if chem in ('lifepo4','lithium-ion') else '0'}';
+<script>(function(){{var q='name='+encodeURIComponent({site_js})+'&home='+encodeURIComponent(location.origin)+{json.dumps('&away='+__import__('urllib.parse').parse.quote(away,safe='') if away else '')}+'&lithium={'1' if chem in ('lifepo4','lithium-ion') else '0'}';
 document.getElementById('go').href='intent://setup?'+q+'#Intent;scheme=solardispatch;package=farm.bsf.solardispatch;end';}})();</script></body></html>"""
     dest=os.path.join(data_dir,"phone-setup.html"); open(dest,"w").write(page)
     ok(f"Wrote {dest} (home Wi-Fi only){'' if away else ' - no dashboard.away_base_url set, so the link carries the home address only'}{'' if have_apk else ' - no widget APK to offer yet'}")
