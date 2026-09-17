@@ -22,12 +22,13 @@ chg=json.loads(json.dumps(pt)); chg["items"]["battery_w"]=1500
 check("battery charging hard => not curtailed", bridge.translate(chg,SEL)["mode_288"]==2)
 night=json.loads(json.dumps(pt)); night["items"]["solarinverter_w"]=0
 check("no sun => not curtailed (never asserts at night)", bridge.translate(night,SEL)["mode_288"]==2)
-inv=dict(SEL, invert_battery_sign=True)
-check("invert_battery_sign flips battery_w", bridge.translate(pt,inv)["batt_power"]==-120)
+check("DEFAULT flips the Select.live sign: a raw -2757 W (charging, as both real units report it) is published as +2757", bridge.DEFAULTS["invert_battery_sign"] is True and bridge.translate({"items":dict(pt["items"],battery_w=-2757)},SEL)["batt_power"]==2757)
+raw=dict(SEL, invert_battery_sign=False)
+check("invert_battery_sign=false passes battery_w through untouched", bridge.translate(pt,raw)["batt_power"]==-120)
 bad=bridge.translate({"items":{"battery_soc":"nan","load_w":None}}, SEL)
 check("garbage readings are dropped, not published as numbers", "soc" not in bad and "ac_load" not in bad and bad["mode_288"]==2)
 check("no ip/device_id => no url", bridge.point_url({"ip":"","device_id":""}) is None)
-fl=json.loads(json.dumps(pt)); fl["items"].update({"battery_soc":93.45703125,"load_w":1333.4567,"battery_w":5240.49})
+fl=json.loads(json.dumps(pt)); fl["items"].update({"battery_soc":93.45703125,"load_w":1333.4567,"battery_w":-5240.49})
 r=bridge.translate(fl,SEL); check("SOC rounded to 0.1, watts to whole W", r["soc"]==93.5 and r["ac_load"]==1333 and r["batt_power"]==5240)
 check("url shape", bridge.point_url({"ip":"10.0.0.5","device_id":"ABC"})=="http://10.0.0.5/cgi-bin/solarmonweb/devices/ABC/point")
 

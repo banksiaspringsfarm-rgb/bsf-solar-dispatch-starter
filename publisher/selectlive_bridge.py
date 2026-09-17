@@ -35,12 +35,16 @@ means it is frequency-shifting the AC-coupled inverter down. All three knobs
 live in config.hardware.selectronic. When in doubt it reports NOT curtailed,
 which only makes the dispatcher more conservative (plain surplus rule applies).
 
-Sign conventions on the Select.live point (observed on SP PRO firmware 2.x):
-    battery_w   > 0 charging, < 0 discharging
+Sign conventions on the Select.live point. MEASURED on two SP PROs (an SPMC482 and an SPMC481), by checking
+battery_w against solar - load with no grid/generator input: 3.3 kW solar, 0.4 kW load -> battery_w = -2.8 kW
+while the bank was plainly charging. So the box reports:
+    battery_w   < 0 CHARGING, > 0 discharging    <- the opposite of what the dispatcher expects
     grid_w      > 0 import,   < 0 export
     shunt_w     DC-coupled solar (MPPT via shunt), 0 if none fitted
     solarinverter_w  AC-coupled inverter output (Fronius/ABB/...)
-If a site's signs turn out inverted, set hardware.selectronic.invert_battery_sign.
+The bridge therefore flips it by default (invert_battery_sign: true) and publishes +charging / -discharging.
+Check it on a sunny morning: sel/batt_power must be POSITIVE while solar exceeds load. If a unit ever turns out
+to report the other way round, set hardware.selectronic.invert_battery_sign to false.
 
 Usage:
     BSF_CONFIG=/path/config.json python3 selectlive_bridge.py          # service
@@ -55,7 +59,7 @@ DEFAULTS = {
     "curtail_soc_pct": 95,
     "curtail_batt_w": 300,
     "curtail_min_pv_w": 400,
-    "invert_battery_sign": False,
+    "invert_battery_sign": True,      # see "Sign conventions" above: both real units measured report charging as NEGATIVE
     "mqtt_host": "127.0.0.1",
     "mqtt_port": 1883,
     "topic_prefix": "sel",

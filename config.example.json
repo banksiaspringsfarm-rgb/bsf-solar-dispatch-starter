@@ -71,11 +71,11 @@
       "curtail_soc_pct": 95,
       "curtail_batt_w": 300,
       "curtail_min_pv_w": 400,
-      "invert_battery_sign": false,
+      "invert_battery_sign": true,
       "mqtt_host": "127.0.0.1",
       "topic_prefix": "sel"
     },
-    "_selectronic": "Only when inverter.kind='selectronic'. ip = the Select.live box's LAN address; device_id = the 32-hex id listed at http://<ip>/cgi-bin/solarmonweb/devices/ . Curtailment is synthesised (no MPPT flag on an SP PRO): SOC>=curtail_soc_pct AND |battery_w|<=curtail_batt_w AND solar>=curtail_min_pv_w. mqtt_host = the broker the flow uses (the Pi itself)."
+    "_selectronic": "Only when inverter.kind='selectronic'. ip = the Select.live box's LAN address; device_id = the 32-hex id listed at http://<ip>/cgi-bin/solarmonweb/devices/ . Curtailment is synthesised (no MPPT flag on an SP PRO): SOC>=curtail_soc_pct AND |battery_w|<=curtail_batt_w AND solar>=curtail_min_pv_w. mqtt_host = the broker the flow uses (the Pi itself). invert_battery_sign: leave true - both SP PROs measured report charging as NEGATIVE on Select.live; verify sel/batt_power is positive on a sunny morning."
   },
   "battery": {
     "chemistry": "lead-acid",
