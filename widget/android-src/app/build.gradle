@@ -1,0 +1,35 @@
+plugins {
+    id 'com.android.application'
+}
+
+// There is deliberately NO buildConfigField here. Nothing about a site - address, link, key - is
+// compiled into this app. Everything is typed in on the phone (SetupActivity) and kept in the
+// app's private storage. An APK built from this source is safe to hand to anyone.
+android {
+    namespace 'farm.bsf.solardispatch'
+    compileSdk 34
+    buildToolsVersion "34.0.0"
+
+    defaultConfig {
+        applicationId "farm.bsf.solardispatch"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    // org.json + HttpURLConnection are built into Android - no libraries, nothing to update.
+}

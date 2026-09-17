@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BSF Solar widget v3 — LIGHT theme palette (default).
+     Dark overrides live in res/values-night/colors.xml and are picked
+     automatically by the host when the phone's system dark mode is on.
+     Any drawable / layout attr that references these @color names therefore
+     flips theme with no code involved. State-coded + accent colours
+     (green/red/amber/cyan, warm yellow #F5B62E) are applied in Java via
+     RemoteViews.setColorInt(light, night) so they live-flip too. -->
+<resources>
+    <!-- Card chrome -->
+    <color name="w_card_bg">#FAFAFA</color>
+    <color name="w_card_border">#E2E5EA</color>
+
+    <!-- Neutral text -->
+    <color name="w_ink">#1A1A1A</color>
+    <color name="w_muted">#7A828E</color>
+    <color name="w_dim">#9AA1AC</color>
+
+    <!-- Dispatch chip (green pill) -->
+    <color name="chip_dispatch_bg">#E7F6EE</color>
+    <color name="chip_dispatch_border">#9FD9BC</color>
+
+    <!-- Throttled / stale chip (red pill) -->
+    <color name="chip_throttled_bg">#FCE7E7</color>
+    <color name="chip_throttled_border">#F0AEAE</color>
+
+    <!-- Refresh button strip — stronger tint/border than the card so it reads as a button -->
+    <color name="w_refresh_bg">#EEF1F5</color>
+    <color name="w_refresh_border">#D7DCE3</color>
+</resources>

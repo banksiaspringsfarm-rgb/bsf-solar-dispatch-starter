@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Solar Dispatch</string>
+    <string name="solar_widget_name">Solar Dispatch</string>
+    <string name="solar_widget_description">Battery, solar, surplus and what is switched on — from your own system.</string>
+</resources>

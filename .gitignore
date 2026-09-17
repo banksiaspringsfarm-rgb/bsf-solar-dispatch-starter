@@ -41,3 +41,6 @@ Thumbs.db
 fleet/sites.json
 fleet/fleet.json
 fleet/fleet_feedback.json
+
+# Widget app builds are attached to releases after testing on a real phone, never committed
+widget/android/*.apk

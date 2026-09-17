@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BSF Solar Dispatch widget v3 — DAY/NIGHT themed, big SOC clock-arc, all dispatcher metrics.
+     Reference: Victron's daylight widget readability; beats it on data shown.
+     RemoteViews-safe views only (LinearLayout / FrameLayout / ImageView / TextView).
+
+     THEMING: chrome colours come from @color tokens (values/ = light, values-night/ =
+     dark navy-charcoal); the host swaps them when the phone's system dark mode toggles —
+     no code path needed. Dynamic + state-coded colours are applied in SolarWidget.java via
+     RemoteViews.setColorInt(light, night) so they live-flip too.
+
+     SOC ring is a Canvas-drawn bitmap (SolarWidget.drawSocRing): a faint full-circle
+     depletion TRACK + a state-coloured arc that sweeps CLOCKWISE from 12 o'clock,
+     length = SOC/100 x 360deg (100% = full circle, 50% = 12->6, 25% = 12->3). The % +
+     state word are a centered overlay so they stay crisp native text.
+     Hot Water uses the paired 🔥💧 glyph; state shown in text (set in Java).
+     Lead-acid: ring red threshold is SOC <= 60% (NOT lithium 20%). -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_widget"
+    android:padding="13dp">
+
+    <!-- ── Top bar: title · status · throttled chip · dispatch chip ── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tv_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="☀ Solar"
+            android:textColor="@color/w_ink"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="· Status: OK"
+            android:textColor="@color/w_muted"
+            android:textSize="10sp"
+            android:singleLine="true"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/chip_throttled"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/chip_throttled"
+            android:paddingStart="7dp"
+            android:paddingEnd="7dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:layout_marginEnd="5dp"
+            android:text="⚠ Throttled"
+            android:textColor="#D33A3A"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/chip_dispatch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/chip_dispatch"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:text="● DISPATCH"
+            android:textColor="#1A9C5B"
+            android:textSize="9sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- ── Main row: big SOC ring (left) · metrics (right) ── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="8dp">
+
+        <!-- SOC ring with centred % + state -->
+        <FrameLayout
+            android:layout_width="84dp"
+            android:layout_height="84dp">
+            <ImageView
+                android:id="@+id/iv_ring"
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:contentDescription="Battery state of charge clock ring" />
+            <LinearLayout
+                android:layout_width="84dp"
+                android:layout_height="84dp"
+                android:orientation="vertical"
+                android:gravity="center">
+                <TextView
+                    android:id="@+id/tv_soc"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="—%"
+                    android:textColor="@color/w_ink"
+                    android:textSize="26sp"
+                    android:textStyle="bold"
+                    android:includeFontPadding="false" />
+                <TextView
+                    android:id="@+id/tv_soc_glyph"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🔋 —"
+                    android:textColor="@color/w_muted"
+                    android:textSize="9sp"
+                    android:includeFontPadding="false" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Metrics column -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="15dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SOLAR PV"
+                android:textColor="@color/w_dim"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05" />
+            <TextView
+                android:id="@+id/tv_pv"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="— W"
+                android:textColor="@color/w_ink"
+                android:textSize="21sp"
+                android:textStyle="bold"
+                android:includeFontPadding="false" />
+            <TextView
+                android:id="@+id/tv_pv_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="AC solar — · DC solar —"
+                android:textColor="@color/w_muted"
+                android:textSize="10sp"
+                android:layout_marginTop="1dp" />
+
+            <!-- Surplus -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="7dp">
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Surplus"
+                    android:textColor="@color/w_muted"
+                    android:textSize="11sp" />
+                <TextView
+                    android:id="@+id/tv_sur"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="— W"
+                    android:textColor="#0E7C99"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Loads: 🔥💧 Hot Water · ❄ Air-con -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="7dp">
+                <TextView
+                    android:id="@+id/tv_hw"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="🔥💧 —"
+                    android:textColor="@color/w_dim"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/tv_ac"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="❄ —"
+                    android:textColor="@color/w_dim"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ── Thin separator above the refresh button strip ──
+         NOTE: must be FrameLayout, NOT a bare <View> — RemoteViews' inflation filter
+         rejects android.view.View ("Class not allowed to be inflated") → "Can't load
+         widget". FrameLayout is on the RemoteViews allow-list. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="7dp"
+        android:background="@color/w_card_border" />
+
+    <!-- ── Refresh button strip ──────────────────────────────────────────────
+         The WHOLE strip is the manual-refresh tap target (distinct from the body
+         above, which opens the dashboard). Static "↻ Tap to refresh" label reads as
+         a button via the tinted/bordered bg_refresh_strip; the "as of HH:mm" absolute
+         freshness rides the button so a frozen widget shows an old time where you tap. -->
+    <LinearLayout
+        android:id="@+id/refresh_strip"
+        android:layout_width="match_parent"
+        android:layout_height="46dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="7dp"
+        android:background="@drawable/bg_refresh_strip"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            android:id="@+id/tv_refresh_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="↻  Tap to refresh"
+            android:textColor="#0E7C99"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:singleLine="true" />
+
+        <TextView
+            android:id="@+id/tv_updated"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="as of —"
+            android:textColor="@color/w_muted"
+            android:textSize="10sp"
+            android:gravity="center_vertical|end"
+            android:singleLine="true"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+</LinearLayout>

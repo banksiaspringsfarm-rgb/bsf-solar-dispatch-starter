@@ -190,6 +190,8 @@
   "dashboard": {
     "tip_after_days": 30,
     "tip_url": "https://ko-fi.com/banksiaspringsfarm",
-    "_note": "The software is free for personal use. tip_url = where the dashboard's ☕buy me a coffee☕ link goes (\"\" hides it). tip_after_days = days before the one-time thank-you card (0 = never). Display only — never affects dispatch."
+    "_note": "The software is free for personal use. tip_url = where the dashboard's ☕buy me a coffee☕ link goes (\"\" hides it). tip_after_days = days before the one-time thank-you card (0 = never). Display only — never affects dispatch.",
+    "away_base_url": "",
+    "_away_base_url": "Optional. The public https address of this site's away view WITHOUT the token, e.g. https://solar-site1.example.com (see install/pi-setup.md section 7). When set, the home-only phone-setup.html page hands the full away link to the widget app so nobody has to type it."
   }
 }

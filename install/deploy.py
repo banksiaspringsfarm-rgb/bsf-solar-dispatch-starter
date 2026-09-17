@@ -403,6 +403,7 @@ RestartSec=5
 WantedBy=default.target
 """)
             ok(f"Wrote systemd unit → {punit} (away view on 127.0.0.1:8781)")
+            _write_phone_setup(cfg, data_dir, open(tok_path).read().strip())
             if args.no_start: warn(f"--no-start: enable later: systemctl --user enable --now {LABEL}")
             else:
                 # user services must outlive the SSH session on a headless Pi
@@ -420,6 +421,33 @@ WantedBy=default.target
         warn(f"OS '{sysname}': run manually:  BSF_CONFIG={cfg_dest} {py} {os.path.join(tgt,'solar_state_publisher.py')}")
     print(f"\n  Dashboard served from: {data_dir}\n  Dashboard server:     {py} {dash_srv} --dir {data_dir} --feedback-dir {fb_dir}")
     return 0
+
+def _write_phone_setup(cfg, data_dir, token):
+    """phone-setup.html: served by the HOME dashboard server only (it is not on the away view's whitelist), so it is
+    reachable on the house Wi-Fi and nowhere else. Open it on a phone that is on that Wi-Fi: install the widget app,
+    then one tap fills the app in - the home address is simply the address the page was opened at, and the long away
+    link never has to be typed or sent through a chat."""
+    import html as _html
+    away_base=(_g(cfg,"dashboard.away_base_url","") or "").strip().rstrip("/")
+    away=f"{away_base}/{token}/" if away_base else ""
+    chem=(_g(cfg,"battery.chemistry","lead-acid") or "").lower()
+    site=(cfg.get("site_name") or "Solar")
+    apk_src=os.path.join(ROOT,"widget","android","solar-dispatch-widget.apk"); have_apk=os.path.exists(apk_src)
+    if have_apk: shutil.copy2(apk_src, os.path.join(data_dir,"solar-dispatch-widget.apk"))
+    page=f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><meta name="referrer" content="no-referrer"><title>Set up this phone</title>
+<style>body{{margin:0;background:#0b1020;color:#e8ecf7;font:17px/1.5 -apple-system,Roboto,Segoe UI,sans-serif;padding:24px 20px 40px}}
+h1{{font-size:24px;margin:0 0 6px}} p{{color:#8b96b5;margin:6px 0 18px}} ol{{padding-left:22px}} li{{margin:0 0 22px}}
+a.btn{{display:block;text-align:center;text-decoration:none;font-weight:700;border-radius:12px;padding:16px;margin-top:10px;min-height:24px}}
+.go{{background:#f5b62e;color:#1a1205}} .dl{{background:#232c47;color:#e8ecf7}} small{{color:#8b96b5;display:block;margin-top:8px;font-size:14px}}</style></head><body>
+<h1>\u2600 {_html.escape(site)}</h1><p>Set up this phone's home-screen widget. Do this while the phone is on the house Wi-Fi.</p>
+<ol><li><b>Install the app</b>{'<a class="btn dl" href="solar-dispatch-widget.apk">Download Solar Dispatch</a><small>Open the download and allow the install when Android asks.</small>' if have_apk else '<small>The app file is not on this box yet. Get it from the project&#39;s Releases page.</small>'}</li>
+<li><b>Fill it in with one tap</b><a class="btn go" id="go" href="#">Set up this phone</a><small>The app opens already filled in. Press Test, then Save.</small></li>
+<li><b>Add the widget</b><small>Long-press the home screen \u2192 Widgets \u2192 Solar Dispatch.</small></li></ol>
+<script>(function(){{var q='name='+encodeURIComponent({json.dumps(site).replace('<','\\u003c')})+'&home='+encodeURIComponent(location.origin)+{json.dumps('&away='+__import__('urllib.parse').parse.quote(away,safe='') if away else '')}+'&lithium={'1' if chem in ('lifepo4','lithium-ion') else '0'}';
+document.getElementById('go').href='intent://setup?'+q+'#Intent;scheme=solardispatch;package=farm.bsf.solardispatch;end';}})();</script></body></html>"""
+    dest=os.path.join(data_dir,"phone-setup.html"); open(dest,"w").write(page)
+    ok(f"Wrote {dest} (home Wi-Fi only){'' if away else ' - no dashboard.away_base_url set, so the link carries the home address only'}{'' if have_apk else ' - no widget APK to offer yet'}")
 
 def _write_plist(path, py, script, cfg, wd):
     import plistlib

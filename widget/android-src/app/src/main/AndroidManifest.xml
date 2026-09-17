@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- usesCleartextTraffic: at home the widget talks to the site's own box on the LAN, which is plain
+         http (there is no certificate for 192.168.x.x). The away link is https. -->
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_sun"
+        android:usesCleartextTraffic="true"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".SetupActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- One-tap setup: solardispatch://setup?name=..&home=..&away=..&lithium=1 opens this screen pre-filled,
+                 so nobody has to type a long away link on a phone keyboard. It only FILLS the form; nothing is saved
+                 until the person presses Save. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="solardispatch" android:host="setup" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".SolarWidget"
+            android:label="@string/solar_widget_name"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="farm.bsf.solardispatch.SOLAR_WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/solar_widget_info" />
+        </receiver>
+
+    </application>
+</manifest>

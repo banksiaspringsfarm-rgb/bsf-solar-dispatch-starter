@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- BSF Solar widget v3 — DARK theme overrides (navy/charcoal).
+     Same @color names as values/colors.xml; the system swaps these in when
+     the phone is in night mode. Card goes deep charcoal-navy, text inverts to
+     near-white. Accent warm yellow #F5B62E + the state ring/text colours stay
+     vivid (applied in Java). Lead-acid SOC bands are identical in both themes
+     (ring red at <=60%, NOT lithium 20%). -->
+<resources>
+    <!-- Card chrome -->
+    <color name="w_card_bg">#161A22</color>
+    <color name="w_card_border">#2A3038</color>
+
+    <!-- Neutral text -->
+    <color name="w_ink">#ECEFF4</color>
+    <color name="w_muted">#9AA3B2</color>
+    <color name="w_dim">#6B7484</color>
+
+    <!-- Dispatch chip (green pill, deep fill) -->
+    <color name="chip_dispatch_bg">#14241C</color>
+    <color name="chip_dispatch_border">#2E5C44</color>
+
+    <!-- Throttled / stale chip (red pill, deep fill) -->
+    <color name="chip_throttled_bg">#2A1717</color>
+    <color name="chip_throttled_border">#6B2E2E</color>
+
+    <!-- Refresh button strip (lifted off the deep card fill) -->
+    <color name="w_refresh_bg">#1E2530</color>
+    <color name="w_refresh_border">#333B47</color>
+</resources>

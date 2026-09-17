@@ -1,0 +1,9 @@
+# build output + machine-local settings (sdk.dir). There are NO secrets in this app by design.
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
