@@ -10,10 +10,10 @@ serve to a wider audience than the per-site dashboards.
 
 Config (fleet.json is the OUTPUT; the input is sites.json):
     {"poll_s": 15, "sites": [
-        {"key":"farm",  "name":"Farm",   "state_url":"http://127.0.0.1:8780/state.json",
-         "dashboard_url":"http://opens-imac:8780/solar_dispatch_dashboard.html"},
-        {"key":"dad",   "name":"Dad",    "state_url":"http://solar-pi-2:8780/state.json",
-         "dashboard_url":"http://solar-pi-2:8780/solar_dispatch_dashboard.html"}
+        {"key":"home",  "name":"Home",   "state_url":"http://127.0.0.1:8780/state.json",
+         "dashboard_url":"http://my-mac:8780/solar_dispatch_dashboard.html"},
+        {"key":"site-a","name":"Site A", "state_url":"http://site-a-pi:8780/state.json",
+         "dashboard_url":"http://site-a-pi:8780/solar_dispatch_dashboard.html"}
     ]}
 
 Usage:  python3 fleet_relay.py [--config sites.json] [--out fleet.json] [--once]

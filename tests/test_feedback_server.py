@@ -8,8 +8,8 @@ def check(n,c):
     global fails; print(("  ok " if c else "  FAIL ")+n); fails+=0 if c else 1
 
 # --- pure ---
-n,e=ds.validate({"text":"  hot water is cold  ","kind":"wrong","name":" Trish ","context":{"soc":91.5,"site":"X","evil":{"a":1},"stale":["soc"]*40}})
-check("valid note trimmed, kind kept, name trimmed", e is None and n["text"]=="hot water is cold" and n["kind"]=="wrong" and n["name"]=="Trish")
+n,e=ds.validate({"text":"  hot water is cold  ","kind":"wrong","name":" Resident ","context":{"soc":91.5,"site":"X","evil":{"a":1},"stale":["soc"]*40}})
+check("valid note trimmed, kind kept, name trimmed", e is None and n["text"]=="hot water is cold" and n["kind"]=="wrong" and n["name"]=="Resident")
 check("context whitelisted: unknown keys dropped, lists capped", "evil" not in n["context"] and n["context"]["soc"]==91.5 and len(n["context"]["stale"])==12)
 check("empty text refused", ds.validate({"text":"   "})[1] is not None)
 check("over-long text refused", ds.validate({"text":"x"*(ds.MAX_TEXT+1)})[1] is not None)
@@ -33,10 +33,10 @@ def req(path, data=None, raw=None, method=None):
     except urllib.error.HTTPError as e: return e.code, e.read().decode(), e.headers
 try:
     st,b,h=req("/state.json"); check("static file still served, uncached", st==200 and json.loads(b)["ok"] and h.get("Cache-Control")=="no-store")
-    st,b,_=req("/feedback",{"text":"Please make the hot water come on earlier","kind":"change","name":"Mum","context":{"soc":88,"site":"spoofed"}})
+    st,b,_=req("/feedback",{"text":"Please make the hot water come on earlier","kind":"change","name":"Resident","context":{"soc":88,"site":"spoofed"}})
     nid=json.loads(b).get("id"); check("POST valid note => 201 + id", st==201 and nid)
     files=os.listdir(fb); check("note written OUTSIDE the web root", len(files)==1 and files[0]==nid+".json" and not os.path.exists(os.path.join(web,"notes")))
-    saved=json.load(open(os.path.join(fb,files[0]))); check("server stamps site + received_ts itself", saved["site"]=="Test Site" and saved["received_ts"]>0 and saved["name"]=="Mum")
+    saved=json.load(open(os.path.join(fb,files[0]))); check("server stamps site + received_ts itself", saved["site"]=="Test Site" and saved["received_ts"]>0 and saved["name"]=="Resident")
     st,b,_=req("/feedback.json"); d=json.loads(b); check("GET /feedback.json lists it", st==200 and d["site"]=="Test Site" and len(d["notes"])==1 and d["notes"][0]["id"]==nid)
     st,_,_=req("/feedback",{"text":""}); check("empty text => 400", st==400)
     st,_,_=req("/feedback",raw=b"{not json"); check("bad JSON => 400", st==400)
