@@ -78,6 +78,61 @@ def fetch(site, timeout):
     except (urllib.error.URLError, OSError, ValueError) as e:
         return offline(site, e)
 
+# ---- feedback inbox -----------------------------------------------------------------------
+# Each Pi's dashboard server holds the household's notes (publisher/dashboard_server.py). We copy them here so
+# the installer reads one inbox, and so a note outlives a wiped or offline Pi. Notes are UNTRUSTED input -- at a
+# site with open Wi-Fi anyone in range can post one -- so every field is re-whitelisted and bounded on the way in,
+# and fleet.html only ever renders them as text.
+NOTE_CTX = ("soc", "pv_w", "load_w", "batt_w", "hw_state", "ac_state", "ac_mode", "curtailed", "stale", "conn", "theme", "viewport", "build", "page")
+FEEDBACK_EVERY_S = 60
+MAX_INBOX = 1000
+
+def clean_note(site, n):
+    """Pure; unit-tested. -> note dict or None."""
+    if not isinstance(n, dict): return None
+    nid, text = n.get("id"), n.get("text")
+    if not (isinstance(nid, str) and 0 < len(nid) <= 40 and isinstance(text, str) and text.strip()): return None
+    ctx = n.get("context") if isinstance(n.get("context"), dict) else {}
+    safe = {}
+    for k in NOTE_CTX:
+        v = ctx.get(k)
+        if isinstance(v, bool) or isinstance(v, (int, float)): safe[k] = v
+        elif isinstance(v, str): safe[k] = v[:120]
+        elif isinstance(v, list): safe[k] = [str(x)[:40] for x in v[:12]]
+    return {"key": "%s/%s" % (site["key"], nid), "site_key": site["key"], "site": site.get("name") or site["key"],
+            "id": nid, "kind": n.get("kind") if n.get("kind") in ("wrong", "change", "question", "other") else "other",
+            "name": n["name"][:60] if isinstance(n.get("name"), str) else None, "text": text.strip()[:2000],
+            "received_ts": _num(n.get("received_ts")), "context": safe}
+
+def feedback_url(site):
+    u = site.get("feedback_url")
+    if u: return u
+    su = site["state_url"]
+    return su[:-len("state.json")] + "feedback.json" if su.endswith("/state.json") else None
+
+def merge_inbox(inbox, site, payload):
+    """Add unseen notes from one site's /feedback.json. Returns how many were new. Pure; unit-tested."""
+    have = {n["key"] for n in inbox}; added = 0
+    for raw in (payload.get("notes") if isinstance(payload, dict) else None) or []:
+        n = clean_note(site, raw)
+        if n and n["key"] not in have: inbox.append(n); have.add(n["key"]); added += 1
+    inbox.sort(key=lambda n: n.get("received_ts") or 0, reverse=True)
+    del inbox[MAX_INBOX:]
+    return added
+
+def collect_feedback(sites, inbox_path, timeout):
+    try: inbox = json.load(open(inbox_path)).get("notes", [])
+    except (OSError, ValueError): inbox = []
+    added = 0
+    for site in sites:
+        url = feedback_url(site)
+        if not url: continue
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r: added += merge_inbox(inbox, site, json.loads(r.read().decode()))
+        except (urllib.error.URLError, OSError, ValueError): pass      # site offline, or not a box that takes notes
+    write_atomic(inbox_path, {"ts": int(time.time() * 1000), "notes": inbox})
+    return added, len(inbox)
+
 def write_atomic(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w") as f: json.dump(obj, f, indent=1)
@@ -94,12 +149,16 @@ def main():
     if not sites: print("[fleet] no sites in %s" % a.config, flush=True); sys.exit(2)
     poll = float(cfg.get("poll_s", 15)); timeout = float(cfg.get("timeout_s", 6))
     print("[fleet] %d site(s) every %ss -> %s" % (len(sites), poll, a.out), flush=True)
+    inbox_path = os.path.join(os.path.dirname(os.path.abspath(a.out)), "fleet_feedback.json"); last_fb = 0
     while True:
         t0 = time.time()
         with ThreadPoolExecutor(max_workers=max(1, len(sites))) as ex:
             cards = list(ex.map(lambda s: fetch(s, timeout), sites))
         write_atomic(a.out, {"ts": int(time.time() * 1000), "poll_s": poll, "sites": cards})
         print("[fleet] " + "  ".join("%s:%s soc=%s pv=%s" % (c["key"], c["state"], c["soc"], c["pv_w"]) for c in cards), flush=True)
+        if a.once or time.time() - last_fb >= FEEDBACK_EVERY_S:
+            last_fb = time.time(); added, total = collect_feedback(sites, inbox_path, timeout)
+            if added: print("[fleet] feedback: %d new note(s), %d in the inbox" % (added, total), flush=True)
         if a.once: break
         time.sleep(max(1.0, poll - (time.time() - t0)))
 

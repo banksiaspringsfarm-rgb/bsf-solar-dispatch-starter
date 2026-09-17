@@ -25,4 +25,19 @@ garbage=fleet.summarise(site,{"ok":True,"ts":"nope","hw":{"soc":"x"}},now); chec
 dead=dict(snap, hw=dict(snap["hw"], stale=["soc","pv_fronius","ac_load"]))
 d=fleet.summarise(site,dead,now); check("stale inverter inputs => offline, numbers withheld", d["state"]=="offline" and d["soc"] is None and d["pv_w"] is None and "no live readings" in d["error"])
 ok_stale=dict(snap, hw=dict(snap["hw"], stale=[])); check("empty stale list => still live", fleet.summarise(site,ok_stale,now)["state"]=="ok")
+# --- feedback inbox ---
+st={"key":"trish","name":"Trish","state_url":"http://pi:8780/state.json"}
+check("feedback url derived from state url", fleet.feedback_url(st)=="http://pi:8780/feedback.json")
+check("no feedback url for a non-standard state url", fleet.feedback_url({"key":"f","state_url":"https://x/solar/state"}) is None)
+raw={"id":"1789650362413-0405027a","text":"  cold water  ","kind":"change","name":"Mum","received_ts":1789650362413,
+     "context":{"soc":97.5,"stale":["soc"],"evil":"<script>","page":"/d.html"},"site":"SPOOFED"}
+n=fleet.clean_note(st,raw)
+check("note cleaned: text trimmed, site comes from OUR list not the payload", n["text"]=="cold water" and n["site"]=="Trish" and n["key"]=="trish/1789650362413-0405027a")
+check("note context whitelisted", "evil" not in n["context"] and n["context"]["soc"]==97.5)
+check("junk notes dropped", fleet.clean_note(st,{"id":"x"}) is None and fleet.clean_note(st,"nope") is None and fleet.clean_note(st,{"id":"a"*41,"text":"t"}) is None)
+inbox=[]; check("merge adds new notes once", fleet.merge_inbox(inbox,st,{"notes":[raw]})==1 and fleet.merge_inbox(inbox,st,{"notes":[raw]})==0 and len(inbox)==1)
+other={"key":"dad","name":"Dad","state_url":"http://d:8780/state.json"}
+newer=dict(raw, received_ts=raw["received_ts"]+5000, text="newer")
+check("same note id at another site is a different note; newest first", fleet.merge_inbox(inbox,other,{"notes":[newer]})==1 and inbox[0]["site"]=="Dad" and len(inbox)==2)
+check("garbage payload tolerated", fleet.merge_inbox(inbox,st,None)==0 and fleet.merge_inbox(inbox,st,{"notes":"x"})==0)
 print("\n%d failure(s)"%fails); sys.exit(1 if fails else 0)

@@ -38,11 +38,24 @@
   .on{color:var(--ok)!important} .curt{color:var(--sun)}
   .err{font-size:12px;color:var(--bad);margin-top:8px}
   .empty{color:var(--dim);padding:40px 0;text-align:center}
+  section.inbox{padding:4px 16px calc(28px + env(safe-area-inset-bottom))}
+  section.inbox h2{font-size:15px;margin:14px 0 10px;display:flex;align-items:center;gap:8px}
+  .badge{background:var(--sun);color:#1a1205;font-size:12px;font-weight:700;border-radius:999px;padding:1px 8px}
+  .note{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .note.unread{border-color:var(--sun)}
+  .note .meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12.5px;color:var(--dim);margin-bottom:6px}
+  .note .meta b{color:var(--fg);font-size:14px}
+  .kind{font-size:11px;font-weight:600;border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+  .kind.wrong{color:var(--bad);border-color:var(--bad)} .kind.change{color:var(--sun);border-color:var(--sun)} .kind.question{color:var(--blue);border-color:var(--blue)}
+  .note p{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.45}
+  .note .ctx{font-size:12px;color:var(--dim);line-height:1.5}
+  .note button{margin-top:8px;min-height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--fg);font:inherit;font-size:13px}
 </style>
 </head>
 <body>
 <header><h1>Solar Fleet<span id="n"></span></h1><div id="upd">loading…</div></header>
 <main id="cards"><div class="empty">Waiting for fleet.json…</div></main>
+<section class="inbox"><h2>Feedback <span id="fbBadge" class="badge" hidden></span></h2><div id="notes"><div class="empty">No notes yet.</div></div></section>
 <script>
 (function(){
   var SOC_WARN = 75, SOC_BAD = 60;   // lead-acid bands; sites can override later via fleet.json
@@ -85,8 +98,38 @@
       .then(function(d){ fails=0; render(d); })
       .catch(function(){ fails++; document.getElementById('upd').textContent='relay unreachable ('+fails+')'; });
   }
+  /* ---- feedback inbox: notes the households left on their own dashboards. Rendered as TEXT only. ---- */
+  var RKEY='bsf_fleet_read_v1';
+  function readSet(){ try{ return JSON.parse(localStorage.getItem(RKEY)||'{}')||{}; }catch(e){ return {}; } }
+  function when(ms){ if(!ms) return ''; var s=(Date.now()-ms)/1000; if(s<90) return 'just now'; if(s<3600) return Math.round(s/60)+' min ago';
+    if(s<86400) return Math.round(s/3600)+' h ago'; return new Date(ms).toLocaleDateString([], {day:'numeric',month:'short'}); }
+  var KIND={wrong:"Something's wrong",change:'Wants a change',question:'Question',other:'Note'};
+  function ctxLine(c){ if(!c) return ''; var b=[];
+    if(c.soc!=null) b.push('battery '+Math.round(c.soc)+'%'); if(c.pv_w!=null) b.push('solar '+Math.round(c.pv_w)+' W');
+    if(c.load_w!=null) b.push('load '+Math.round(c.load_w)+' W'); if(c.hw_state) b.push('hot water '+c.hw_state);
+    if(c.ac_state) b.push('air-con '+c.ac_state); if(c.stale&&c.stale.length) b.push('NO live readings: '+c.stale.join(', '));
+    if(c.conn&&c.conn!=='live') b.push('page was '+c.conn); if(c.build) b.push('build '+c.build);
+    return b.length?('At the time: '+b.join(' · ')):''; }
+  function renderNotes(d){
+    var el=document.getElementById('notes'), notes=(d&&d.notes)||[], read=readSet();
+    if(!notes.length){ el.innerHTML='<div class="empty">No notes yet.</div>'; document.getElementById('fbBadge').hidden=true; return; }
+    var unread=notes.filter(function(n){return !read[n.key];}).length, bd=document.getElementById('fbBadge');
+    bd.hidden=!unread; bd.textContent=unread+' new';
+    el.innerHTML=notes.slice(0,100).map(function(n){ var u=!read[n.key];
+      return '<div class="note'+(u?' unread':'')+'"><div class="meta"><b>'+esc(n.site)+'</b><span class="kind '+esc(n.kind)+'">'+esc(KIND[n.kind]||'Note')+'</span>'
+        +(n.name?'<span>from '+esc(n.name)+'</span>':'')+'<span>'+esc(when(n.received_ts))+'</span></div><p>'+esc(n.text)+'</p>'
+        +'<div class="ctx">'+esc(ctxLine(n.context))+'</div>'
+        +'<button type="button" data-key="'+esc(n.key)+'">'+(u?'Mark as read':'Mark unread')+'</button></div>'; }).join('');
+  }
+  var lastNotes=null;
+  document.getElementById('notes').addEventListener('click',function(e){ var b=e.target.closest('button[data-key]'); if(!b) return;
+    var r=readSet(), k=b.getAttribute('data-key'); if(r[k]) delete r[k]; else r[k]=1;
+    try{ localStorage.setItem(RKEY,JSON.stringify(r)); }catch(x){} renderNotes(lastNotes); });
+  function pollNotes(){ fetch('fleet_feedback.json',{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); })
+    .then(function(d){ lastNotes=d; renderNotes(d); }).catch(function(){}); }
+  pollNotes(); setInterval(pollNotes, 60000);
   poll(); setInterval(poll, 15000);
-  document.addEventListener('visibilitychange', function(){ if(!document.hidden) poll(); });
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden){ poll(); pollNotes(); } });
 })();
 </script>
 </body>

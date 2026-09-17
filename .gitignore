@@ -40,3 +40,4 @@ Thumbs.db
 # Fleet relay: real site list + generated output
 fleet/sites.json
 fleet/fleet.json
+fleet/fleet_feedback.json
