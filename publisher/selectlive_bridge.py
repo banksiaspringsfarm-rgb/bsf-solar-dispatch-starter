@@ -98,13 +98,14 @@ def translate(point, sel):
     pv_ac = num(items.get("solarinverter_w")) or 0.0
     load  = num(items.get("load_w"))
     grid  = num(items.get("grid_w"))
+    # Round at the source: the SP PRO hands out 8-decimal floats; SOC to 0.1 %, watts to whole W.
     out = {}
-    if soc  is not None: out["soc"] = soc
-    if batt is not None: out["batt_power"] = batt
-    out["pv_dc"] = pv_dc
-    out["pv_fronius"] = pv_ac
-    if load is not None: out["ac_load"] = load
-    if grid is not None: out["grid_w"] = grid
+    if soc  is not None: out["soc"] = round(soc, 1)
+    if batt is not None: out["batt_power"] = round(batt)
+    out["pv_dc"] = round(pv_dc)
+    out["pv_fronius"] = round(pv_ac)
+    if load is not None: out["ac_load"] = round(load)
+    if grid is not None: out["grid_w"] = round(grid)
     curtailed = (soc is not None and batt is not None
                  and soc >= float(sel["curtail_soc_pct"])
                  and abs(batt) <= float(sel["curtail_batt_w"])

@@ -306,6 +306,9 @@ def cmd_dashboard(cfg, args):
       "SOC_ON": _num((sw.get("w1") or {}).get("on"),80), "SOC_OFF": _num((sw.get("w1") or {}).get("off"),75),
       "INSIDE_ON": _num(ac.get("inside_temp_on_c"),19), "INSIDE_OFF": _num(ac.get("inside_temp_off_c"),22),
       "BATT_CAP_KWH": _g(cfg,"battery.capacity_kwh"),
+      "acLabel": (_loads_by_role(cfg).get("air_con") or {}).get("label") or "",
+      "acLoadNote": _g(cfg,"display.ac_load_note","") or "",
+      "chargers": [] if _inverter_kind(cfg)=="selectronic" else [{"key":c.get("key"),"label":c.get("label") or c.get("key"),"kind":c.get("kind")} for c in (_g(cfg,"hardware.chargers") or []) if c.get("key")],
     }
     dest=os.path.join(DASH_DIR,"dashboard-config.js")
     with open(dest,"w") as f:

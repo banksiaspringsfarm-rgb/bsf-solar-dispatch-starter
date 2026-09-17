@@ -268,42 +268,6 @@
 
   <div id="staleBanner" class="stalebanner"></div>
 
-  <!-- METRICS -->
-  <div class="card collapsible" data-card="live">
-    <h2 class="cardhdr"><span class="chev">▾</span>Live signals <span id="rawNote" style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">· raw values, shown with thresholds</span></h2>
-    <div class="cardbody"><div class="cardbody-inner">
-    <div class="metrics">
-      <div class="metric gold"><div class="k">Solar PV</div><div class="v"><span id="m_pv">–</span><span class="u">W</span></div><div class="sub2" id="m_pv_sub">DC + Fronius</div></div>
-      <div class="metric green"><div class="k">Battery SOC</div><div class="v"><span id="m_soc">–</span><span class="u">%</span></div><div class="sub2" id="m_soc_sub">&nbsp;</div></div>
-      <div class="metric cyan"><div class="k">Surplus now</div><div class="v"><span id="m_sur">–</span><span class="u">W</span></div><div class="sub2" id="m_sur_sub">PV − house</div></div>
-      <div class="metric amber"><div class="k">Hot-water draw</div><div class="v"><span id="m_hw">–</span><span class="u">W</span></div><div class="sub2" id="m_hw_sub">plug .37</div></div>
-      <div class="metric blue"><div class="k">House AC load</div><div class="v"><span id="m_ac">–</span><span class="u">W</span></div><div class="sub2" id="m_ac_sub">trailer lead</div></div>
-      <div class="metric"><div class="k">Battery flow</div><div class="v"><span id="m_batt">–</span><span class="u">W</span></div><div class="sub2" id="m_batt_sub">+chg / −dis</div></div>
-    </div>
-
-    <!-- 7-day rolling aggregates from the relay (snap.weekly) — see renderWeekly() -->
-    <div class="subhead">This week <span class="subnote" id="wk_note">rolling 7-day</span></div>
-    <div class="metrics">
-      <div class="metric green"><div class="k">Avg SOC</div><div class="v"><span id="wk_soc">–</span><span class="u">%</span></div><div class="sub2">7-day mean</div></div>
-      <div class="metric"><div class="k">Peak discharge</div><div class="v"><span id="wk_dis">–</span><span class="u">W</span></div><div class="sub2">biggest instant −draw</div></div>
-      <div class="metric"><div class="k">Min SOC</div><div class="v"><span id="wk_minsoc">–</span><span class="u">%</span></div><div class="sub2">lowest reached</div></div>
-      <div class="metric gold"><div class="k">Solar generated</div><div class="v"><span id="wk_solar">–</span><span class="u">kWh</span></div><div class="sub2">DC + Fronius</div></div>
-      <div class="metric amber"><div class="k">Hot-water run</div><div class="v"><span id="wk_hw">–</span><span class="u">h</span></div><div class="sub2" id="wk_hw_sub">– kWh</div></div>
-      <div class="metric cyan"><div class="k">Hours at 100%</div><div class="v"><span id="wk_full">–</span><span class="u">h</span></div><div class="sub2">surplus spilled</div></div>
-      <div class="metric blue"><div class="k">Air-con run</div><div class="v"><span id="wk_ac">–</span><span class="u">h</span></div><div class="sub2" id="wk_ac_sub">– kWh</div></div>
-      <div class="metric"><div class="k">Essentials</div><div class="v"><span id="wk_ess">–</span><span class="u">kWh</span></div><div class="sub2">excl. HW + A/C</div></div>
-    </div>
-
-    <!-- Curtailment summary (Phase A) — forward-tracked from the canonical MppOperationMode throttle -->
-    <div class="subhead">Curtailment <span class="subnote" id="curt_cov">tracking…</span></div>
-    <div class="curt">
-      <div class="curt-hero"><span id="curt_h">–</span><span class="cu">h</span><span class="pct" id="curt_pct"></span></div>
-      <div class="curt-fg">~<span id="curt_kwh">–</span> kWh solar foregone <span class="est" id="curt_est" title="Rough estimate. Each throttled tracker's loss = its best demonstrated uncurtailed output this week minus what it makes while limited, summed over time. Builds up once trackers run unthrottled; reads ~0 when only the low-yield BlueSolars back off.">est</span></div>
-      <div class="curt-trk" id="curt_trk"></div>
-    </div>
-    </div></div>
-  </div>
-
   <!-- DIAGRAM -->
   <div class="card">
     <h2>Energy flow</h2>
@@ -483,7 +447,7 @@
         <!-- DC MPPT box (was 'Solar array'); tappable for per-charger drill-down -->
         <g class="tappable" id="mpptBox" onclick="toggleDrill()">
           <rect class="src-box" x="100" y="22" width="160" height="48" rx="9"/>
-          <text class="node-label" x="180" y="37" text-anchor="middle" fill="#d9b65a">DC MPPT · 4 chargers</text>
+          <text class="node-label" id="dcNodeLabel" x="180" y="37" text-anchor="middle" fill="#d9b65a">DC MPPT · 4 chargers</text>
           <text class="node-val" id="d_pv" x="170" y="56" text-anchor="middle" fill="#ffd87a">– W</text>
           <circle id="mppt_throt" class="throtdot" cx="247" cy="34" r="4"/>
         </g>
@@ -548,14 +512,14 @@
         <text class="node-label" x="95" y="493" text-anchor="middle">🔥💧 Hot water</text>
         <text class="node-val" id="d_hw" x="78" y="513" text-anchor="middle" font-size="13">– W</text>
         <text id="b_hw" class="onbadge hw" x="128" y="513" text-anchor="end">OFF</text>
-        <text class="node-sub" x="95" y="526" text-anchor="middle">1.6 kW element</text>
+        <text class="node-sub" id="hwNodeSub" x="95" y="526" text-anchor="middle">element</text>
 
         <!-- AC load (moved down +82) -->
         <rect id="load_ac" class="loadbox ac" x="200" y="476" width="130" height="56" rx="9"/>
         <text class="node-label" x="265" y="493" text-anchor="middle">🌡️ Air-con</text>
         <text class="node-val" id="d_ac" x="248" y="513" text-anchor="middle" font-size="13">– W</text>
         <text id="b_ac" class="onbadge ac" x="298" y="513" text-anchor="end">OFF</text>
-        <text class="node-sub" x="265" y="526" text-anchor="middle">Daikin FTXZ25</text>
+        <text class="node-sub" id="acNodeSub" x="265" y="526" text-anchor="middle">air-con</text>
 
         <!-- transparent tap-targets (Phase C): tap a node → time-series detail card.
              On top of the boxes so the whole tile is the hit area. -->
@@ -804,6 +768,43 @@
     <h2>Dispatch history · last 24 h</h2>
     <div class="hist" id="hist"><div class="empty">Waiting for the first samples… load transitions and anomalies will appear here.</div></div>
   </div>
+
+  <!-- METRICS (raw live signals; moved below the picture at Steven's request) -->
+  <div class="card collapsible" data-card="live">
+    <h2 class="cardhdr"><span class="chev">▾</span>Live signals <span id="rawNote" style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">· raw values, shown with thresholds</span></h2>
+    <div class="cardbody"><div class="cardbody-inner">
+    <div class="metrics">
+      <div class="metric gold"><div class="k">Solar PV</div><div class="v"><span id="m_pv">–</span><span class="u">W</span></div><div class="sub2" id="m_pv_sub">DC + Fronius</div></div>
+      <div class="metric green"><div class="k">Battery SOC</div><div class="v"><span id="m_soc">–</span><span class="u">%</span></div><div class="sub2" id="m_soc_sub">&nbsp;</div></div>
+      <div class="metric cyan"><div class="k">Surplus now</div><div class="v"><span id="m_sur">–</span><span class="u">W</span></div><div class="sub2" id="m_sur_sub">PV − house</div></div>
+      <div class="metric amber"><div class="k">Hot-water draw</div><div class="v"><span id="m_hw">–</span><span class="u">W</span></div><div class="sub2" id="m_hw_sub">plug .37</div></div>
+      <div class="metric blue"><div class="k">House AC load</div><div class="v"><span id="m_ac">–</span><span class="u">W</span></div><div class="sub2" id="m_ac_sub">essential loads</div></div>
+      <div class="metric"><div class="k">Battery flow</div><div class="v"><span id="m_batt">–</span><span class="u">W</span></div><div class="sub2" id="m_batt_sub">+chg / −dis</div></div>
+    </div>
+
+    <!-- 7-day rolling aggregates from the relay (snap.weekly) — see renderWeekly() -->
+    <div class="subhead">This week <span class="subnote" id="wk_note">rolling 7-day</span></div>
+    <div class="metrics">
+      <div class="metric green"><div class="k">Avg SOC</div><div class="v"><span id="wk_soc">–</span><span class="u">%</span></div><div class="sub2">7-day mean</div></div>
+      <div class="metric"><div class="k">Peak discharge</div><div class="v"><span id="wk_dis">–</span><span class="u">W</span></div><div class="sub2">biggest instant −draw</div></div>
+      <div class="metric"><div class="k">Min SOC</div><div class="v"><span id="wk_minsoc">–</span><span class="u">%</span></div><div class="sub2">lowest reached</div></div>
+      <div class="metric gold"><div class="k">Solar generated</div><div class="v"><span id="wk_solar">–</span><span class="u">kWh</span></div><div class="sub2">DC + Fronius</div></div>
+      <div class="metric amber"><div class="k">Hot-water run</div><div class="v"><span id="wk_hw">–</span><span class="u">h</span></div><div class="sub2" id="wk_hw_sub">– kWh</div></div>
+      <div class="metric cyan"><div class="k">Hours at 100%</div><div class="v"><span id="wk_full">–</span><span class="u">h</span></div><div class="sub2">surplus spilled</div></div>
+      <div class="metric blue"><div class="k">Air-con run</div><div class="v"><span id="wk_ac">–</span><span class="u">h</span></div><div class="sub2" id="wk_ac_sub">– kWh</div></div>
+      <div class="metric"><div class="k">Essentials</div><div class="v"><span id="wk_ess">–</span><span class="u">kWh</span></div><div class="sub2">excl. HW + A/C</div></div>
+    </div>
+
+    <!-- Curtailment summary (Phase A) — forward-tracked from the canonical MppOperationMode throttle -->
+    <div class="subhead">Curtailment <span class="subnote" id="curt_cov">tracking…</span></div>
+    <div class="curt">
+      <div class="curt-hero"><span id="curt_h">–</span><span class="cu">h</span><span class="pct" id="curt_pct"></span></div>
+      <div class="curt-fg">~<span id="curt_kwh">–</span> kWh solar foregone <span class="est" id="curt_est" title="Rough estimate. Each throttled tracker's loss = its best demonstrated uncurtailed output this week minus what it makes while limited, summed over time. Builds up once trackers run unthrottled; reads ~0 when only the low-yield BlueSolars back off.">est</span></div>
+      <div class="curt-trk" id="curt_trk"></div>
+    </div>
+    </div></div>
+  </div>
+
 
   <footer>
     <div><b>Data source:</b> <span id="srcLine">connecting…</span> Read-only with <b>one</b> exception — from the farm network you can adjust the AC heating ON/OFF setpoints (validated server-side). It still cannot flip any switch directly.</div>
@@ -1254,6 +1255,22 @@ function fmtShort(ts){ var d=new Date(ts); return d.toLocaleString('en-AU',{hour
 function num(x){ return (typeof x==='number'&&isFinite(x))?x:null; }
 function W(x){ var n=num(x); return n===null?'–':Math.round(n).toLocaleString(); }
 function signW(x){ var n=num(x); if(n===null)return '–'; return (n>=0?'+':'')+Math.round(n).toLocaleString(); }
+
+/* ---- site labels + charger list from dashboard-config.js (farm defaults otherwise) ---- */
+(function(){ var c=window.BSF_CONFIG||{};
+  if($('hwNodeSub')&&c.ELEMENT) $('hwNodeSub').textContent=(c.ELEMENT/1000).toFixed(1)+' kW element';
+  if($('acNodeSub')&&c.acLabel) $('acNodeSub').textContent=c.acLabel;
+  if($('m_ac_sub')&&c.acLoadNote) $('m_ac_sub').textContent=c.acLoadNote;
+  if(Array.isArray(c.chargers)){
+    var lbl=$('dcNodeLabel'); if(lbl) lbl.textContent=c.chargers.length?('DC MPPT · '+c.chargers.length+' charger'+(c.chargers.length===1?'':'s')):'DC solar';
+    var rows=document.querySelectorAll('.drillhead ~ .chrow'); rows.forEach(function(r){ r.remove(); });
+    var head=document.querySelector('.drillhead'); var tb=$('throtbar');
+    if(head){ c.chargers.forEach(function(ch){ var d=document.createElement('div'); d.className='chrow';
+      d.innerHTML='<span class="pill '+(ch.kind==='multi'?'rs':'mppt')+'">'+(ch.kind==='multi'?'RS':'MPPT')+'</span><span class="cn"></span><span class="ct" id="dd_'+ch.key+'">—</span>';
+      d.querySelector('.cn').textContent=ch.label||ch.key; head.parentNode.insertBefore(d, tb||null); });
+      if(!c.chargers.length){ var d=document.createElement('div'); d.className='chrow'; d.innerHTML='<span class="cn">No DC chargers on this system (solar is AC-coupled)</span>'; head.parentNode.insertBefore(d, tb||null); } }
+  }
+})();
 
 /* ---- bootstrap persisted ---- */
 samples=prune(load(HKEY)); events=prune(load(EKEY));
@@ -2127,10 +2144,8 @@ function renderDrill(hw, live){
   var c = (hw && hw.chargers && typeof hw.chargers==='object') ? hw.chargers
         : (live && relayChargers.data && (Date.now()-relayChargers.recv)<120000 ? relayChargers.data : null);
   function val(k){ return (c && num(c[k])!==null) ? W(c[k])+' W' : '—'; }
-  if($('dd_288')) $('dd_288').textContent=val('m288');
-  if($('dd_289')) $('dd_289').textContent=val('m289');
-  if($('dd_rs1')) $('dd_rs1').textContent=val('rs1');
-  if($('dd_rs2')) $('dd_rs2').textContent=val('rs2');
+  var chKeys=(window.BSF_CONFIG&&Array.isArray(window.BSF_CONFIG.chargers))?window.BSF_CONFIG.chargers.map(function(c){return c.key;}):['288','289','rs1','rs2'];
+  chKeys.forEach(function(k){ var el=$('dd_'+k); if(el) el.textContent=val(k==='288'?'m288':(k==='289'?'m289':k)); });
   var tb=$('throtbar'), dot=$('mppt_throt'); if(!tb) return;
   if(!c){ tb.className='throtbar'; tb.textContent='⏳ Per-charger feed lands in Phase 3 — individual MPPT / RS values aren’t published yet.'; if(dot) dot.classList.remove('on'); return; }
   var mppt=(num(c.m288)||0)+(num(c.m289)||0), rs=(num(c.rs1)||0)+(num(c.rs2)||0);
