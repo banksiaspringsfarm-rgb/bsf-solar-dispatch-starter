@@ -379,7 +379,8 @@ WantedBy=default.target
                 subprocess.run(["systemctl","--user","daemon-reload"])
                 for svc in ([LABEL, LABEL+"-selectlive"] if sel else [LABEL])+["bsf-dashboard-http"]:
                     r=subprocess.run(["systemctl","--user","enable","--now",svc], capture_output=True, text=True)
-                    (ok if r.returncode==0 else warn)(f"systemctl enable --now {svc} rc={r.returncode} {r.stderr.strip()}")
+                    subprocess.run(["systemctl","--user","restart",svc], capture_output=True)   # enable --now leaves a running unit on its OLD config
+                    (ok if r.returncode==0 else warn)(f"systemctl enable + restart {svc} rc={r.returncode} {r.stderr.strip()}")
     else:
         warn(f"OS '{sysname}': run manually:  BSF_CONFIG={cfg_dest} {py} {os.path.join(tgt,'solar_state_publisher.py')}")
     print(f"\n  Dashboard served from: {data_dir}\n  Quick static server:  cd {data_dir} && {py} -m http.server 8780")
