@@ -424,6 +424,9 @@ WantedBy=default.target
 # ---- widget / smoke / reset ---------------------------------------------------
 def cmd_widget(cfg, args):
     step("Sideloading the Android widget APK")
+    if not os.path.exists(APK):
+        warn("No Android widget app in this bundle yet (see widget/android/README.md). Use the dashboard's 'Add to Home screen' for now; iPhone: widget/ios/README.md.")
+        return 0
     adb=shutil.which("adb") or os.path.expanduser("~/Library/Android/sdk/platform-tools/adb")
     if not (shutil.which("adb") or os.path.exists(adb)):
         warn("adb not found. Copy the APK to your phone manually, or for iPhone see widget/ios/README.md."); print(f"      {APK}"); return 1

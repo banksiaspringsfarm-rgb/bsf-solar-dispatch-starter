@@ -37,7 +37,7 @@ config.example.json   the ONE system-config file — the wizard fills a copy (co
 node-red/             the dispatcher flow (ships with __TOKEN__ placeholders deploy.py fills)
 dashboard/            the phone dashboard (single HTML) + generated dashboard-config.js
 publisher/            the Python relay that feeds the dashboard + requirements.txt
-widget/android/       Android home-screen widget (.apk)
+widget/android/       Android home-screen widget (being rebuilt — see its README)
 widget/ios/           iOS home-screen widget (Scriptable .js + README)
 install/              deploy.py + tuya-walkthrough + region map + troubleshooting
 meta/                 forum / beta-call copy (ignore during install)
@@ -244,9 +244,9 @@ the user to open the dashboard URL on the phone and **Add to Home Screen** (iPho
 Share → Add to Home Screen; Android: Chrome → ⋮ → Add to Home screen). It becomes a
 full-screen app icon. Recommend this to everyone; it needs no third-party app.
 
-**Android — optional native widget:** if they want the home-screen widget and have `adb`:
-`python3 install/deploy.py widget` (wake/unlock the phone first — wireless-debug sleeps on
-lock). Otherwise hand them `widget/android/BSF-Solar-Dispatch-v3.apk` to install manually.
+**Android — native widget: not in the bundle yet.** The standalone solar-only app is being
+rebuilt (`widget/android/README.md` says why). Until it lands, Add to Home Screen above is the
+Android answer; `python3 install/deploy.py widget` just says so and exits cleanly.
 
 **iPhone — optional native widget (Scriptable, ~5 min):** follow `widget/ios/README.md`.
 Summary: the user installs the free **Scriptable** app, creates a new script, pastes

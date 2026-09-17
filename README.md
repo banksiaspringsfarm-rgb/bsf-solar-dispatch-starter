@@ -102,7 +102,7 @@ answers the questions that matter. Nothing is hard-coded to one farm.
 | [`publisher/solar_state_publisher.py`](publisher/solar_state_publisher.py) | Read-only relay that reads the Cerbo and feeds the dashboard. Stdlib + `paho-mqtt`. |
 | [`publisher/selectlive_bridge.py`](publisher/selectlive_bridge.py) | Selectronic only: polls the Select.live local JSON and republishes SOC / PV / load / battery W on MQTT for the dispatcher. |
 | [`install/pi-setup.md`](install/pi-setup.md) | Turning a Raspberry Pi into the whole controller (Node-RED + broker + relay + Tailscale) — needed for Selectronic, optional for Victron. |
-| [`widget/android/`](widget/android/) · [`widget/ios/`](widget/ios/) | Optional home-screen widgets — Android `.apk`; iPhone via the free Scriptable app. |
+| [`widget/android/`](widget/android/) · [`widget/ios/`](widget/ios/) | Optional home-screen widgets — iPhone via the free Scriptable app; the Android app is being rebuilt (see `widget/android/README.md`). |
 | [`install/`](install/) | `deploy.py` installer + Tuya setup walkthrough, region→data-center map, troubleshooting. |
 | [`config.example.json`](config.example.json) | The one system-config file. The wizard fills a copy (`config.json`). |
 | [`CLAUDE.md`](CLAUDE.md) | The install runbook Claude Code reads to set this up for you. |
