@@ -1154,6 +1154,100 @@
     <div class="hist" id="hist"><div class="empty">Waiting for the first samples… load transitions and anomalies will appear here.</div></div>
   </div>
 
+  <!-- FEEDBACK — a note to whoever looks after this system. Stored on this box (POST /feedback,
+       publisher/dashboard_server.py) with the readings at that moment; kept on the phone and retried if
+       the box can't be reached. Never changes anything by itself. -->
+  <style>
+    #fbCard label{display:block;font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;margin:12px 0 6px}
+    #fbCard textarea,#fbCard input,#fbCard select{width:100%;box-sizing:border-box;font:inherit;font-size:16px;color:var(--ink);
+      background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px}
+    #fbCard textarea{min-height:120px;resize:vertical;line-height:1.4}
+    #fbKinds{display:flex;gap:8px;flex-wrap:wrap}
+    #fbKinds button{flex:1 1 auto;min-height:44px;padding:0 14px;border-radius:999px;border:1px solid var(--line);
+      background:var(--bg2);color:var(--ink);font:inherit;font-size:14px;cursor:pointer}
+    #fbKinds button[aria-pressed="true"]{border-color:var(--gold);color:var(--gold);font-weight:700}
+    #fbSend{margin-top:14px;width:100%;min-height:48px;border-radius:12px;border:0;background:var(--gold);color:#1a1205;
+      font:inherit;font-size:16px;font-weight:700;cursor:pointer}
+    #fbSend[disabled]{opacity:.5;cursor:default}
+    #fbMsg{margin-top:10px;font-size:14px;min-height:20px}
+    #fbMsg.ok{color:var(--green)} #fbMsg.wait{color:var(--amber)} #fbMsg.bad{color:var(--red)}
+    #fbCount{font-size:12px;color:var(--dim);text-align:right;margin-top:4px}
+    #fbHint{font-size:13px;color:var(--dim);line-height:1.45}
+  </style>
+  <div class="card collapsible" data-card="fb" data-collapsed="1" id="fbCard">
+    <h2 class="cardhdr"><span class="chev">▾</span>💬 Feedback <span style="text-transform:none;letter-spacing:0;color:var(--dim);font-weight:500">· something wrong, or something you'd like changed?</span></h2>
+    <div class="cardbody"><div class="cardbody-inner">
+      <div id="fbHint">Write it here and it goes to whoever looks after this system, along with what the system was doing at the time. It does not change anything by itself.</div>
+      <label>What's it about</label>
+      <div id="fbKinds" role="group" aria-label="What's it about">
+        <button type="button" data-kind="wrong" aria-pressed="false">Something's wrong</button>
+        <button type="button" data-kind="change" aria-pressed="true">I'd like a change</button>
+        <button type="button" data-kind="question" aria-pressed="false">A question</button>
+      </div>
+      <label for="fbText">Your note</label>
+      <textarea id="fbText" maxlength="2000" placeholder="e.g. The hot water was cold this morning. Can it come on earlier?"></textarea>
+      <div id="fbCount">0 / 2000</div>
+      <label for="fbName">Your name (optional)</label>
+      <input id="fbName" maxlength="60" autocomplete="name" placeholder="So they know who to ask">
+      <button type="button" id="fbSend" disabled>Send</button>
+      <div id="fbMsg" role="status" aria-live="polite"></div>
+    </div></div>
+  </div>
+  <script>
+  (function(){
+    var QKEY='bsf_feedback_queue_v1', NKEY='bsf_feedback_name_v1';
+    var $id=function(i){return document.getElementById(i);};
+    var txt=$id('fbText'), nm=$id('fbName'), btn=$id('fbSend'), msg=$id('fbMsg'), kinds=$id('fbKinds'), kind='change';
+    if(!txt||!btn) return;
+    function lget(k,d){ try{ var v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(e){ return d; } }
+    function lset(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+    function say(t,c){ msg.textContent=t; msg.className=c||''; }
+    nm.value=lget(NKEY,'')||'';
+    kinds.addEventListener('click',function(e){ var b=e.target.closest('button'); if(!b) return; kind=b.getAttribute('data-kind');
+      [].forEach.call(kinds.querySelectorAll('button'),function(x){ x.setAttribute('aria-pressed', x===b?'true':'false'); }); });
+    txt.addEventListener('input',function(){ $id('fbCount').textContent=txt.value.length+' / 2000'; btn.disabled=!txt.value.trim(); });
+    function n(v){ return (typeof v==='number'&&isFinite(v))?v:null; }
+    function context(){
+      var c={ page:location.pathname, theme:(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark',
+              viewport:window.innerWidth+'x'+window.innerHeight, site:(window.BSF_CONFIG&&window.BSF_CONFIG.siteName)||null,
+              build:(window.BSF_CONFIG&&window.BSF_CONFIG.build)||null };
+      try{ var s=(typeof state!=='undefined')?state:null, h=s&&s.hw, a=s&&s.ac;
+        if(s){ c.conn=s.conn; c.state_ts=s.hwTs||null; }
+        if(h){ c.soc=n(h.soc); c.pv_w=n(h.pv_total); c.load_w=n(h.ac_load); c.batt_w=n(h.batt_power); c.hw_state=h.hwState||null;
+               c.curtailed=!!h.curtailed; if(Array.isArray(h.stale)) c.stale=h.stale; }
+        if(a){ c.ac_state=a.acState||null; c.ac_mode=a.ac_mode||null; }
+      }catch(e){}
+      return c;
+    }
+    function post(note){ return fetch('/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(note)})
+      .then(function(r){ return r.json().then(function(j){ return {status:r.status, body:j}; }); }); }
+    function flush(){
+      var q=lget(QKEY,[]); if(!q.length) return Promise.resolve(0);
+      var note=q[0];
+      return post(note).then(function(res){
+        if(res.status===201 || res.status===400 || res.status===413){ q.shift(); lset(QKEY,q); return flush().then(function(k){ return k+(res.status===201?1:0); }); }
+        return 0;   // 429 / 5xx: leave it queued
+      }).catch(function(){ return 0; });
+    }
+    btn.addEventListener('click',function(){
+      var t=txt.value.trim(); if(!t) return;
+      var note={ text:t, kind:kind, name:nm.value.trim()||null, context:context(), client_ts:Date.now() };
+      lset(NKEY, nm.value.trim()); btn.disabled=true; say('Sending…','wait');
+      post(note).then(function(res){
+        if(res.status===201){ txt.value=''; $id('fbCount').textContent='0 / 2000'; say('Sent. Thank you.','ok'); }
+        else if(res.status===429){ var q=lget(QKEY,[]); q.push(note); lset(QKEY,q); txt.value=''; say('Saved on this phone. It will send a bit later.','wait'); }
+        else { btn.disabled=false; say((res.body&&res.body.error)||'That could not be sent.','bad'); }
+      }).catch(function(){
+        var q=lget(QKEY,[]); q.push(note); lset(QKEY,q); txt.value=''; $id('fbCount').textContent='0 / 2000';
+        say('Saved on this phone. It will send when this page can reach the system again.','wait');
+      });
+    });
+    function retry(){ flush().then(function(k){ if(k>0) say(k+' saved note'+(k===1?'':'s')+' sent.','ok'); }); }
+    retry(); setInterval(retry, 60000); window.addEventListener('online', retry);
+    var pending=lget(QKEY,[]).length; if(pending) say(pending+' note'+(pending===1?'':'s')+' waiting to send.','wait');
+  })();
+  </script>
+
   <footer>
     <div><b>Data source:</b> <span id="srcLine">connecting…</span> Read-only with <b>one</b> exception — the AC heating ON/OFF setpoints (validated server-side). It still cannot flip any switch directly. That write is an MQTT publish to the Cerbo broker, which a browser will only open from an <b>http</b> page on the farm LAN — this dashboard's own LAN address. On this public https link it is blocked as mixed content, which is deliberate: mobile data can watch the farm, it cannot touch the heating.</div>
     <div style="margin-top:6px"><b>Honesty:</b> all numbers are raw dispatcher signals shown with their thresholds. When a feed is stale or a field is missing, you'll see a badge — never a guessed value. History is built from real samples — the farm relay keeps a rolling 24 h, and on the farm network the page also accrues its own. The Node-RED archive endpoints (<span class="mono">/api/bsf/*</span>) aren't wired, so there's no deeper backfill than that.</div>

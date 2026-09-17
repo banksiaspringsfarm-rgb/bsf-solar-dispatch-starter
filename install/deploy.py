@@ -188,6 +188,11 @@ def _flow_rev(base):
         return json.loads(r.read().decode()).get("rev")
 
 
+def _git_build():
+    """Short commit of the bundle this site was deployed from; travels with every feedback note."""
+    try: return subprocess.run(["git","-C",ROOT,"rev-parse","--short","HEAD"],capture_output=True,text=True,timeout=5).stdout.strip() or None
+    except Exception: return None
+
 def _inverter_kind(cfg):
     return (_g(cfg,"hardware.inverter.kind") or "victron").strip().lower()
 
@@ -306,6 +311,7 @@ def cmd_dashboard(cfg, args):
       "SOC_ON": _num((sw.get("w1") or {}).get("on"),80), "SOC_OFF": _num((sw.get("w1") or {}).get("off"),75),
       "INSIDE_ON": _num(ac.get("inside_temp_on_c"),19), "INSIDE_OFF": _num(ac.get("inside_temp_off_c"),22),
       "BATT_CAP_KWH": _g(cfg,"battery.capacity_kwh"),
+      "build": _git_build(),
       "showBattery": bool(_g(cfg,"dashboard.show_battery_card",False)), "showDiag": bool(_g(cfg,"dashboard.show_connectivity_card",False)),
       "acLabel": (_loads_by_role(cfg).get("air_con") or {}).get("label") or "",
       "acLoadNote": _g(cfg,"display.ac_load_note","") or "",
@@ -327,6 +333,9 @@ def cmd_publisher(cfg, args):
     os.makedirs(tgt, exist_ok=True)
     data_dir=_g(cfg,"out_dir") or os.path.join(tgt,"dispatch-host"); os.makedirs(data_dir, exist_ok=True)
     shutil.copy2(SRC_PUB, os.path.join(tgt,"solar_state_publisher.py"))
+    dash_srv=os.path.join(tgt,"dashboard_server.py"); fb_dir=os.path.join(tgt,"feedback")
+    site_lbl=(cfg.get("site_name") or "Solar").replace('"',"")          # goes inside a quoted unit argument
+    shutil.copy2(os.path.join(os.path.dirname(SRC_PUB),"dashboard_server.py"), dash_srv)
     sel = _inverter_kind(cfg)=="selectronic"
     if sel: shutil.copy2(os.path.join(os.path.dirname(SRC_PUB),"selectlive_bridge.py"), os.path.join(tgt,"selectlive_bridge.py"))
     shutil.copy2(os.path.join(DASH_DIR,"solar_dispatch_dashboard.html"), os.path.join(data_dir,"solar_dispatch_dashboard.html"))
@@ -359,12 +368,12 @@ def cmd_publisher(cfg, args):
                 ok(f"Wrote systemd unit → {bunit}")
             dunit=os.path.expanduser("~/.config/systemd/user/bsf-dashboard-http.service")
             open(dunit,"w").write(f"""[Unit]
-Description=BSF Solar Dispatch dashboard static server (:8780)
+Description=BSF Solar Dispatch dashboard + feedback drop-box (:8780)
 After=network-online.target
 
 [Service]
 WorkingDirectory={data_dir}
-ExecStart={py} -m http.server 8780 --bind 0.0.0.0
+ExecStart={py} {dash_srv} --dir {data_dir} --feedback-dir {fb_dir} --port 8780 --site "{site_lbl}"
 Restart=always
 RestartSec=5
 
@@ -387,7 +396,7 @@ WantedBy=default.target
                     (ok if r.returncode==0 else warn)(f"systemctl enable + restart {svc} rc={r.returncode} {r.stderr.strip()}")
     else:
         warn(f"OS '{sysname}': run manually:  BSF_CONFIG={cfg_dest} {py} {os.path.join(tgt,'solar_state_publisher.py')}")
-    print(f"\n  Dashboard served from: {data_dir}\n  Quick static server:  cd {data_dir} && {py} -m http.server 8780")
+    print(f"\n  Dashboard served from: {data_dir}\n  Dashboard server:     {py} {dash_srv} --dir {data_dir} --feedback-dir {fb_dir}")
     return 0
 
 def _write_plist(path, py, script, cfg, wd):
