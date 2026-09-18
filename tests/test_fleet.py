@@ -25,6 +25,15 @@ garbage=fleet.summarise(site,{"ok":True,"ts":"nope","hw":{"soc":"x"}},now); chec
 dead=dict(snap, hw=dict(snap["hw"], stale=["soc","pv_fronius","ac_load"]))
 d=fleet.summarise(site,dead,now); check("stale inverter inputs => offline, numbers withheld", d["state"]=="offline" and d["soc"] is None and d["pv_w"] is None and "no live readings" in d["error"])
 ok_stale=dict(snap, hw=dict(snap["hw"], stale=[])); check("empty stale list => still live", fleet.summarise(site,ok_stale,now)["state"]=="ok")
+# --- unconnected loads must never read "on" ---
+nc=dict(snap, loads={"hot_water_w":None,"hot_water_connected":False,"ac_connected":False})
+c2=fleet.summarise(site,nc,now)
+check("no hot-water device + dispatcher 'on' => 'would run', never 'on'", c2["hw_state"]=="would run")
+c3=fleet.summarise(site,dict(nc, hw=dict(snap["hw"],hwState="off")),now)
+check("no hot-water device + dispatcher 'off' => 'not connected'", c3["hw_state"]=="not connected")
+check("no air-con device => air-con state and mode blank", c2["ac_state"] is None and c2["ac_mode"] is None)
+check("a site WITH devices is unchanged", fleet.summarise(site,snap,now)["hw_state"]=="on" and fleet.summarise(site,snap,now)["ac_mode"]=="AUTO")
+
 # --- feedback inbox ---
 st={"key":"site-b","name":"Site B","state_url":"http://pi:8780/state.json"}
 check("feedback url derived from state url", fleet.feedback_url(st)=="http://pi:8780/feedback.json")

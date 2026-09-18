@@ -100,8 +100,9 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(b)))
         self.end_headers(); self.wfile.write(b)
     def end_headers(self):
-        # live data files must never be cached by a phone browser
-        if self.path.split("?")[0].endswith(".json"): self.send_header("Cache-Control", "no-store")
+        # Nothing here may be cached by a phone browser: the data files change every few seconds, and the page and its
+        # config change whenever the installer redeploys (a cached page kept showing the previous version's wording).
+        self.send_header("Cache-Control", "no-store")
         super().end_headers()
     def do_GET(self):
         if self.path.split("?")[0] == "/feedback.json":

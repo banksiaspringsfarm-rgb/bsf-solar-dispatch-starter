@@ -68,6 +68,7 @@
     var battLbl = battDir==='chg'?'charging':(battDir==='dis'?'discharging':'battery');
     var pill = s.state==='ok'?'LIVE':(s.state==='lagging'?'LAGGING':'OFFLINE');
     var hw = s.hw_state==null?'—':s.hw_state; var ac = s.ac_state==null?'—':s.ac_state;
+    var hwCls = hw==='on'?'on':(hw==='would run'?'curt':'');   /* "would run" = dispatcher says yes but nothing is fitted: amber, not green */
     var href = s.dashboard_url||'#';
     return '<a class="card '+s.state+'" href="'+esc(href)+'">'
       +'<div class="top"><div class="name">'+esc(s.name)+'</div><div class="pill">'+pill+'</div></div>'
@@ -76,7 +77,7 @@
       +'<div class="m pv"><b>'+fmtW(s.pv_w)+'</b><i>solar'+(s.curtailed?' <span class="curt">· curtailed</span>':'')+'</i></div>'
       +'<div class="m"><b>'+fmtW(s.load_w)+'</b><i>house load</i></div>'
       +'<div class="m batt"><b class="'+battDir+'">'+(s.batt_w==null?'—':(s.batt_w>25?'+':(s.batt_w<-25?'−':''))+fmtW(s.batt_w))+'</b><i>'+battLbl+'</i></div>'
-      +'<div class="m"><b class="'+(hw==='on'?'on':'')+'">'+esc(hw)+'</b><i>hot water</i></div>'
+      +'<div class="m"><b class="'+hwCls+'">'+esc(hw)+'</b><i>hot water</i></div>'
       +'<div class="m"><b class="'+(ac==='on'?'on':'')+'">'+esc(ac)+(s.ac_mode?'<small>'+esc(s.ac_mode)+'</small>':'')+'</b><i>air-con</i></div>'
       +'</div>'
       +'<div class="foot"><span>today <em>'+(s.today_hw_kwh==null?'—':s.today_hw_kwh.toFixed(1))+' kWh</em> hot water</span>'

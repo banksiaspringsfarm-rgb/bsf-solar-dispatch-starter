@@ -50,8 +50,12 @@ def summarise(site, snap, fetched_ms):
         "ok": bool(snap.get("ok")), "state": stale, "age_s": age_s, "hw_age_s": hw_age,
         "soc": _num(hw.get("soc")), "pv_w": _num(hw.get("pv_total")), "load_w": _num(hw.get("ac_load")),
         "batt_w": _num(hw.get("batt_power")), "curtailed": bool(hw.get("curtailed")),
-        "hw_state": hw.get("hwState"), "hw_w": _num(loads.get("hot_water_w")),
-        "ac_state": ac.get("acState"), "ac_mode": ac.get("ac_mode"), "inside_temp": _num(ac.get("inside_temp")),
+        # A load with no device cannot be on. The dispatcher's hwState "on" then means "would run now" - say that, never "on".
+        "hw_state": ("would run" if hw.get("hwState") == "on" else "not connected") if loads.get("hot_water_connected") is False else hw.get("hwState"),
+        "hw_w": _num(loads.get("hot_water_w")),
+        "ac_state": None if loads.get("ac_connected") is False else ac.get("acState"),
+        "ac_mode": None if loads.get("ac_connected") is False else ac.get("ac_mode"),
+        "inside_temp": _num(ac.get("inside_temp")),
         "today_hw_kwh": _num(today.get("hw_kwh")), "today_ac_kwh": _num(today.get("ac_kwh")), "today_hw_h": _num(today.get("hw_h")),
         "source": snap.get("source"),
     }
