@@ -274,6 +274,12 @@ def _prune_weekly(t_ms):
         weekly.pop(k, None)
 
 
+CORE_INPUTS = ("soc", "pv_dc", "pv_fronius", "ac_load")
+def _inputs_stale(hw):
+    st = hw.get("stale") if isinstance(hw, dict) else None
+    if isinstance(st, dict): st = [k for k, v in st.items() if v]
+    return any(k in CORE_INPUTS for k in (st or []))
+
 def _accum_into(b, dt_s, t_ms, hw, loads, chargers, live):
     """Integrate one interval (dt_s seconds) of a fresh hw sample into bucket b.
     live=True is a real-time tick: it reads the metered HW watts and accumulates the
@@ -281,6 +287,12 @@ def _accum_into(b, dt_s, t_ms, hw, loads, chargers, live):
     seed sample — no plug meter (falls back to nominal element draw) and NO curtailment
     (pre-canonical `curtailed` was the heuristic; modes/per-charger watts aren't in history)."""
     _ensure_keys(b)
+    # The dispatcher lists the inputs it has stopped receiving in hw.stale. A status message whose core inputs are
+    # stale still CARRIES the last-known numbers - integrating them would credit the site with phantom solar and
+    # load for as long as the feed is down (seen: a Pi with its bridge idle "produced" 1 kW all night from a
+    # retained reading). Stale interval => not covered, nothing accrued.
+    if _inputs_stale(hw):
+        return b
     use_plug = live
     dt_h = dt_s / 3600.0
     b["span_s"] += dt_s
