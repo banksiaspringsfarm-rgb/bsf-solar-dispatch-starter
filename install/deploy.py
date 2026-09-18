@@ -316,6 +316,7 @@ def cmd_dashboard(cfg, args):
       "acSolarName": (_g(cfg,"hardware.fronius.label","") or ("AC solar" if _inverter_kind(cfg)=="selectronic" else "Fronius")),
       "hwConnected": bool((_loads_by_role(cfg).get("hot_water") or {}).get("device_id")),
       "hasAirCon": "air_con" in _loads_by_role(cfg),
+      "sourceName": "system" if _inverter_kind(cfg)=="selectronic" else "Cerbo",
       "showBattery": bool(_g(cfg,"dashboard.show_battery_card",False)), "showDiag": bool(_g(cfg,"dashboard.show_connectivity_card",False)),
       "acLabel": (_loads_by_role(cfg).get("air_con") or {}).get("label") or "",
       "acLoadNote": _g(cfg,"display.ac_load_note","") or "",

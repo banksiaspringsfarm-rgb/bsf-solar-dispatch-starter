@@ -1738,29 +1738,31 @@ function fetchFirst(urls){ return urls.reduce(function(p,u){ return p.catch(func
 (function siteShape(){ var c=window.BSF_CONFIG||{};
   var name=(typeof c.acSolarName==='string'&&c.acSolarName&&c.acSolarName!=='Fronius')?c.acSolarName:null;
   var noAc=c.hasAirCon===false, noHw=c.hwConnected===false;
-  if(!name&&!noAc&&!noHw) return;
+  var src=(typeof c.sourceName==='string'&&c.sourceName&&c.sourceName!=='Cerbo')?c.sourceName:null;   /* 'Cerbo' is the author's box; a Selectronic site has none */
+  if(!name&&!noAc&&!noHw&&!src) return;
   function byId(i){ return document.getElementById(i); }
   function hide(el){ if(el&&el.style.display!=='none') el.style.display='none'; }
   function txt(el,t){ if(el&&el.textContent!==t) el.textContent=t; }
   function rename(root){
     var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null), n, list=[];
-    while((n=w.nextNode())){ var p=n.parentNode&&n.parentNode.nodeName; if(p==='SCRIPT'||p==='STYLE') continue; if(n.nodeValue.indexOf('Fronius')>=0||n.nodeValue.indexOf('FRONIUS')>=0) list.push(n); }
-    list.forEach(function(n){ n.nodeValue=n.nodeValue.replace(/Fronius/g,name).replace(/FRONIUS/g,name.toUpperCase()); });
+    while((n=w.nextNode())){ var p=n.parentNode&&n.parentNode.nodeName; if(p==='SCRIPT'||p==='STYLE') continue; var v=n.nodeValue; if((name&&(v.indexOf('Fronius')>=0||v.indexOf('FRONIUS')>=0))||(src&&v.indexOf('Cerbo')>=0)) list.push(n); }
+    list.forEach(function(n){ var v=n.nodeValue; if(name) v=v.replace(/Fronius/g,name).replace(/FRONIUS/g,name.toUpperCase()); if(src) v=v.replace(/Cerbo/g,src); n.nodeValue=v; });
   }
   function apply(){
-    if(name) rename(document.body);
+    if(name||src) rename(document.body);
     if(noAc){
       ['load_ac','d_ac','b_ac','d_ac_today','p_ac','c_sur_ac'].forEach(function(i){ hide(byId(i)); });
       [].forEach.call(document.querySelectorAll('svg text.node-label'),function(t){ if(/Air-con/i.test(t.textContent)) hide(t); });
       [].forEach.call(document.querySelectorAll('rect.node-tap'),function(r){ if(/openDetail\('ac'\)/.test(r.getAttribute('onclick')||'')) hide(r); });
       hide(document.querySelector('[data-card="ac"]'));
       var wk=byId('wk_ac'); if(wk){ var tile=wk.closest?wk.closest('.metric'):null; hide(tile); }
+      var en=byId('en_cards'); if(en) [].forEach.call(en.children,function(t){ if(/air.?con/i.test(t.textContent)) hide(t); });
     }
     if(noHw){
       var would=false; try{ would=!!(typeof state!=='undefined'&&state&&state.hw&&state.hw.hwState==='on'); }catch(e){}
-      txt(byId('d_hw'), 'not connected');
+      txt(byId('d_hw'), '\u2014');                                   /* the value slot is narrow: words here collide with the badge */
       txt(byId('b_hw'), would?'WOULD RUN':'WAITING');
-      txt(byId('d_hw_today'), would?'surplus is there now':'no switch fitted yet');
+      txt(byId('d_hw_today'), would?'not connected \u00b7 surplus is there now':'not connected \u00b7 no switch yet');
       var box=byId('load_hw'); if(box&&box.classList.contains('on')) box.classList.remove('on');
       var pt=byId('p_hw'); if(pt&&pt.classList.contains('on')) pt.classList.remove('on');
     }
