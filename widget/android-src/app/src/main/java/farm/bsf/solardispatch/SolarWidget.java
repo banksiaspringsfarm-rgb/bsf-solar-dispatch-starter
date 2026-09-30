@@ -115,6 +115,7 @@ public class SolarWidget extends AppWidgetProvider {
     private static final String KEY_SOC = "last_soc", KEY_PV = "last_pv", KEY_PVDC = "last_pvdc",
         KEY_PVFR = "last_pvfr", KEY_SURPLUS = "last_surplus", KEY_BATT = "last_batt",
         KEY_HW_ON = "last_hw_on", KEY_AC_ON = "last_ac_on", KEY_HW_W = "last_hw_w", KEY_AC_W = "last_ac_w",
+        KEY_HW_CONN = "last_hw_conn", KEY_AC_CONN = "last_ac_conn",
         KEY_LOCKOUT = "last_lockout", KEY_CURT = "last_curt", KEY_SNAP_TS = "last_snapshot_ts";
 
     @Override
@@ -242,6 +243,11 @@ public class SolarWidget extends AppWidgetProvider {
         }
 
         // ── Loads: HW 🔥💧 (state in text) · AC ❄ (bright when on, dim when off) ─
+        // A load with no device at this site is not drawn at all: the dispatcher still computes
+        // hwState/acState there ("would run now"), and an ON or OFF beside it would be a claim
+        // about a heater or air-con that does not exist.
+        rv.setViewVisibility(R.id.tv_hw, d == null || d.hwConnected ? View.VISIBLE : View.INVISIBLE);
+        rv.setViewVisibility(R.id.tv_ac, d == null || d.acConnected ? View.VISIBLE : View.INVISIBLE);
         boolean hwOn = d != null && d.hwOn, acOn = d != null && d.acOn;
         rv.setTextViewText(R.id.tv_hw, hwLabel(hwOn, d != null && d.hwStale, d != null ? d.hwW : Integer.MIN_VALUE));
         txt(rv, R.id.tv_hw, hwOn ? AMBER_L : DIM_L, hwOn ? AMBER_D : DIM_D, night);
@@ -389,6 +395,9 @@ public class SolarWidget extends AppWidgetProvider {
                 r.acW = optInt(loads, "ac_w");
                 r.hwStale = "stale".equals(loads.optString("hot_water_state", ""));
                 r.acStale = "stale".equals(loads.optString("ac_state", ""));
+                // Absent on older relays (the author's farm) => treat as connected, as before.
+                r.hwConnected = loads.optBoolean("hot_water_connected", true);
+                r.acConnected = loads.optBoolean("ac_connected", true);
             }
 
             String hwMode = hw != null ? hw.optString("mode", "")   : "";
@@ -450,6 +459,7 @@ public class SolarWidget extends AppWidgetProvider {
             .putInt(KEY_SURPLUS, r.surplus).putInt(KEY_BATT, r.batt)
             .putBoolean(KEY_HW_ON, r.hwOn).putBoolean(KEY_AC_ON, r.acOn)
             .putInt(KEY_HW_W, r.hwW).putInt(KEY_AC_W, r.acW)
+            .putBoolean(KEY_HW_CONN, r.hwConnected).putBoolean(KEY_AC_CONN, r.acConnected)
             .putBoolean(KEY_LOCKOUT, r.lockout).putBoolean(KEY_CURT, r.curtailed)
             .putLong(KEY_SNAP_TS, r.snapshotTs).apply();
     }
@@ -462,6 +472,7 @@ public class SolarWidget extends AppWidgetProvider {
         r.surplus = p.getInt(KEY_SURPLUS, Integer.MIN_VALUE); r.batt = p.getInt(KEY_BATT, Integer.MIN_VALUE);
         r.hwOn = p.getBoolean(KEY_HW_ON, false); r.acOn = p.getBoolean(KEY_AC_ON, false);
         r.hwW = p.getInt(KEY_HW_W, Integer.MIN_VALUE); r.acW = p.getInt(KEY_AC_W, Integer.MIN_VALUE);
+        r.hwConnected = p.getBoolean(KEY_HW_CONN, true); r.acConnected = p.getBoolean(KEY_AC_CONN, true);
         r.lockout = p.getBoolean(KEY_LOCKOUT, false); r.curtailed = p.getBoolean(KEY_CURT, false);
         r.snapshotTs = p.getLong(KEY_SNAP_TS, 0);
         r.stale = true;
@@ -510,6 +521,7 @@ public class SolarWidget extends AppWidgetProvider {
             pvFron = Integer.MIN_VALUE, surplus = Integer.MIN_VALUE, batt = Integer.MIN_VALUE,
             hwW = Integer.MIN_VALUE, acW = Integer.MIN_VALUE;
         boolean hwOn = false, acOn = false, hwStale = false, acStale = false,
+            hwConnected = true, acConnected = true,
             lockout = false, curtailed = false, stale = false;
         long snapshotTs = 0;
     }

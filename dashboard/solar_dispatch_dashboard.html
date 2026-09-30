@@ -1861,7 +1861,6 @@ function setSrc(mode){
 function startHttpMode(){
   if(httpMode) return;
   fetchFirst(['/solar/state','state.json'])
-    .then(function(r){ if(!r.ok) throw 0; return r.json(); })
     .then(function(snap){ enterHttpMode(); applySnap(snap); })
     .catch(function(){ armFallback(HTTP_RETRY_MS); });
 }
@@ -1875,7 +1874,6 @@ function enterHttpMode(){
 }
 function pollHttp(){
   fetchFirst(['/solar/state','state.json'])
-    .then(function(r){ if(!r.ok) throw 0; return r.json(); })
     .then(applySnap)
     .catch(function(){ state.conn='closed'; paintConn(); paintStale(currentSnapshot()); });
 }
