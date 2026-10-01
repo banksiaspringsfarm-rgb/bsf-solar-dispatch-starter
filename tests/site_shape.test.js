@@ -61,5 +61,13 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // chargers absent from config (older dashboard-config.js) must NOT be read as "no DC"
   const dom4=new JSDOM(page3,{runScripts:'outside-only'}); dom4.window.BSF_CONFIG={acSolarName:'ABB ×2'}; dom4.window.eval(block); await sleep(30);
   check('config without a chargers list keeps the DC box', dom4.window.document.getElementById('mpptBox').style.display!=='none');
+  // layout guards (static: jsdom has no layout). Measured in a real browser on 2026-10-02: "88.8%" and "100%" at 11 px bold are
+  // inside the ring's 46 px hole; the title must start right of the ring (ring outer edge x=161).
+  const soc=html.match(/<text id="d_soc"[^>]*font-size="([\d.]+)"/);
+  check('battery % font fits inside the ring (<= 11 px)', soc && +soc[1]<=11);
+  const bt=html.match(/<text class="node-label" x="(\d+)" y="\d+" text-anchor="middle">Battery bank<\/text>/);
+  check('"Battery bank" title centred clear of the ring (x >= 205)', bt && +bt[1]>=205);
+  const ly=html.match(/txtCurtY=cb1\+(\d+), lblY=cb1\+(\d+),/);
+  check('detail chart: time labels sit >= 10 px below the "curtailed" caption', ly && (+ly[2])-(+ly[1])>=10);
   console.log('\n'+fails+' failure(s)'); process.exit(fails?1:0);
 })();

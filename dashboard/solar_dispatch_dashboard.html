@@ -663,12 +663,12 @@
 
         <!-- battery -->
         <rect class="node-box" x="90" y="116" width="180" height="86" rx="11"/>
-        <text class="node-label" x="180" y="133" text-anchor="middle">Battery bank</text>
+        <text class="node-label" x="216" y="134" text-anchor="middle">Battery bank</text>
         <g transform="translate(132 159)">
           <circle class="socring-bg" r="26" cx="0" cy="0"/>
           <circle id="socRing" class="socring-fg" r="26" cx="0" cy="0" transform="rotate(-90)"
             stroke-dasharray="163.4" stroke-dashoffset="163.4"/>
-          <text id="d_soc" x="0" y="5" text-anchor="middle" fill="#e8eef8" font-size="16" font-weight="700">–</text>
+          <text id="d_soc" x="0" y="4" text-anchor="middle" fill="#e8eef8" font-size="11" font-weight="700">–</text>
         </g>
         <text class="node-label" x="216" y="156" text-anchor="middle">flow</text>
         <text class="node-val" id="d_batt" x="216" y="176" text-anchor="middle" font-size="13">– W</text>
@@ -3320,7 +3320,7 @@ function drawDetailChart(data,node){
   // nodes; the Battery node still shows its own SOC line + min/max band + diamonds (that IS its
   // graph). No right-axis companion on the other nodes.
   var svg=$('dt_chart');
-  var x0=34, x1=308, y0=22, y1=130, cb0=139, cb1=145, txtCurtY=cb1+7, lblY=cb1+13, yTitle=11, pw=x1-x0, ph=y1-y0, n=data.pts.length;
+  var x0=34, x1=308, y0=22, y1=130, cb0=139, cb1=145, txtCurtY=cb1+7, lblY=cb1+21, yTitle=11, pw=x1-x0, ph=y1-y0, n=data.pts.length;
   var vals=data.pts.filter(function(p){return p.v!==null;}).map(function(p){return p.v;});
   if(!vals.length){ svg.innerHTML='<text x="175" y="84" text-anchor="middle" class="dc-axis" style="font-size:11px;fill:#5b6b86">No data captured for this range yet.</text>'; DT.geo=null; var ro0=$('dt_readout'); if(ro0) ro0.innerHTML=''; return; }
   var isSoc=(node.kind==='soc');
