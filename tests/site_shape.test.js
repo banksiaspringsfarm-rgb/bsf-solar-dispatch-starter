@@ -37,5 +37,29 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // a normal farm-like site must be left completely alone
   const dom2=new JSDOM(page,{runScripts:'outside-only'}); dom2.window.BSF_CONFIG={acSolarName:'Fronius',hasAirCon:true,hwConnected:true}; dom2.window.eval(block); await sleep(40);
   check('a site WITH a Fronius, an air-con and a connected plug is untouched', dom2.window.document.getElementById('d_hw').textContent==='≈ 1,100 W' && dom2.window.document.getElementById('load_ac').style.display!=='none' && /Fronius/.test(dom2.window.document.getElementById('m_pv_sub').textContent));
+  // a site with NO DC chargers (chargers: []): no DC box, no per-tracker anything, no foregone estimate
+  const page3=`<body><svg><g id="mpptBox"><text>DC solar</text></g><path id="c_sun_arr"/><path id="c_arr_bat"/><circle id="p_gen"/><circle id="p_gen2"/>
+   <rect class="node-tap" onclick="openDetail('dc')"/><rect class="node-tap" onclick="openDetail('fron')"/><text id="d_hw"></text><text id="b_hw"></text><text id="d_hw_today"></text></svg>
+   <div id="drill">DC MPPT — per-charger</div><span id="hwState" class="st on">● ON</span>
+   <div class="metric"><span id="m_hw">≈ 0</span><div class="sub2" id="m_hw_sub">plug .37</div></div>
+   <div id="m_pv_sub">DC 0 + Fronius 4,700</div><div class="metric"><span id="wk_solar">111</span><div class="sub2">DC + Fronius</div></div>
+   <div class="metric"><span id="wk_ess">76</span><div class="sub2">excl. HW + A/C</div></div>
+   <div class="curt-fg">~0.0 kWh solar foregone</div><div id="curt_trk"><div class="ctk">MPPT-288</div></div>
+   <div><b>Data source:</b> <span id="srcLine">live</span> Read-only with <b>one</b> exception — the AC heating setpoints.</div></body>`;
+  const dom3=new JSDOM(page3,{runScripts:'outside-only'}); const w3=dom3.window, d3=w3.document;
+  w3.BSF_CONFIG={acSolarName:'ABB ×2',hasAirCon:false,hwConnected:false,sourceName:'system',chargers:[]}; w3.state={hw:{hwState:'on'}};
+  w3.eval('var state=window.state; var NODES={sun:{sub:"DC MPPT + Fronius"}};'+block); await sleep(40);
+  const hid=id=>d3.getElementById(id).style.display==='none';
+  check('no-DC site: DC box, its wires, dots, tap target and drill-down hidden', ['mpptBox','c_sun_arr','c_arr_bat','p_gen','p_gen2','drill'].every(hid) && d3.querySelector("rect[onclick*=\"'dc'\"]").style.display==='none' && d3.querySelector("rect[onclick*=\"'fron'\"]").style.display!=='none');
+  check('no-DC site: no MPPT text anywhere visible, curtailment is one whole-site line', !/MPPT/.test(d3.getElementById('curt_trk').textContent) && /Whole-site/.test(d3.getElementById('curt_trk').textContent) && d3.querySelector('.curt-fg').style.display==='none');
+  check('no-DC site: solar sub-lines say all AC-coupled (live tile, weekly tile, Total Solar detail)', d3.getElementById('m_pv_sub').textContent==='all AC-coupled · ABB ×2' && d3.getElementById('wk_solar').nextElementSibling.textContent==='all AC-coupled · ABB ×2' && w3.eval('NODES.sun.sub')==='all AC-coupled · ABB ×2');
+  for(let i=0;i<10;i++){ d3.getElementById('curt_trk').innerHTML='<div class="ctk">MPPT-288 '+i+'</div>'; d3.getElementById('m_pv_sub').textContent='DC 0 + Fronius 47'+i; await sleep(10); }
+  await sleep(40);
+  check('no-DC site: per-tracker bars stay gone after 10 redraws', !/MPPT|Fronius/.test(d3.getElementById('curt_trk').textContent+d3.getElementById('m_pv_sub').textContent));
+  check('unconnected hot water: card pill and draw tile never claim ON or a plug', d3.getElementById('hwState').textContent==='WOULD RUN' && d3.getElementById('hwState').className==='st arming' && d3.getElementById('m_hw_sub').textContent==='not connected' && d3.getElementById('m_hw').textContent==='—');
+  check('no air-con: essentials tile and footer drop the air-con wording', d3.getElementById('wk_ess').nextElementSibling.textContent==='excl. hot water' && !/heating|exception/.test(d3.getElementById('srcLine').parentNode.textContent) && /cannot switch anything/.test(d3.getElementById('srcLine').parentNode.textContent));
+  // chargers absent from config (older dashboard-config.js) must NOT be read as "no DC"
+  const dom4=new JSDOM(page3,{runScripts:'outside-only'}); dom4.window.BSF_CONFIG={acSolarName:'ABB ×2'}; dom4.window.eval(block); await sleep(30);
+  check('config without a chargers list keeps the DC box', dom4.window.document.getElementById('mpptBox').style.display!=='none');
   console.log('\n'+fails+' failure(s)'); process.exit(fails?1:0);
 })();

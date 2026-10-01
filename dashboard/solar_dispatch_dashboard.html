@@ -428,6 +428,19 @@
     window.BSF_CONFIG || {}
   );
 </script>
+<style>
+  /* Starter-only colour fixes (the farm page keeps its own). The Total AC Output title and its source line were
+     inline pale-blue fills, so in light mode they nearly vanished on the light tile; the AC-coupled source box's
+     "bypasses battery" line was dim grey on dark olive and sat on the box edge (box is now 6 px taller). */
+  svg.flow .totac-lbl{fill:#cfe0ff}
+  svg.flow #d_totac_src{fill:#9fb4d6}
+  svg.flow #fronSub{fill:#b3a679}
+  @media (prefers-color-scheme: light){
+    svg.flow .totac-lbl{fill:#566175}
+    svg.flow #d_totac_src{fill:#4a4a4a}
+    svg.flow #fronSub{fill:#4a4a4a}
+  }
+</style>
 </head>
 <body>
 
@@ -643,10 +656,10 @@
         </g>
 
         <!-- NEW: Fronius (AC-coupled) box — bypasses the battery, feeds the AC bus -->
-        <rect class="src-box" x="-80" y="122" width="78" height="46" rx="9"/>
+        <rect class="src-box" id="fronBox" x="-80" y="122" width="78" height="52" rx="9"/>
         <text class="node-label" x="-41" y="138" text-anchor="middle" fill="#d9b65a">Fronius · AC</text>
         <text class="node-val" id="d_fron" x="-41" y="156" text-anchor="middle" font-size="12" fill="#ffd87a">– W</text>
-        <text class="node-sub" x="-41" y="165" text-anchor="middle">bypasses battery</text>
+        <text class="node-sub" id="fronSub" x="-41" y="167" text-anchor="middle">bypasses battery</text>
 
         <!-- battery -->
         <rect class="node-box" x="90" y="116" width="180" height="86" rx="11"/>
@@ -682,10 +695,10 @@
              The essD/surD bus drops pass THROUGH this band (occluded here, re-emerge below).
              READOUT ONLY — display math; dispatcher / relay / surplus_now untouched. -->
         <rect id="totac_box" class="totac-box" x="36" y="286" width="288" height="56" rx="10"/>
-        <text class="node-label" x="48" y="303" text-anchor="start" style="fill:#cfe0ff">Total AC Output</text>
+        <text class="node-label totac-lbl" x="48" y="303" text-anchor="start">Total AC Output</text>
         <text id="d_totac_chk" x="312" y="303" text-anchor="end" font-size="9.5" font-weight="800" fill="#34d399">–</text>
         <text class="node-val" id="d_totac" x="48" y="329" text-anchor="start" font-size="17" fill="#eaf2ff">– W</text>
-        <text class="node-sub" id="d_totac_src" x="312" y="329" text-anchor="end" style="fill:#9fb4d6">Fronius – + Inv –</text>
+        <text class="node-sub" id="d_totac_src" x="312" y="329" text-anchor="end">Fronius – + Inv –</text>
 
         <!-- essential (moved down +82 to make room for the Total AC Output band) -->
         <rect class="node-box" x="30" y="368" width="130" height="48" rx="9"/>
@@ -719,7 +732,7 @@
         <g>
           <rect class="node-tap" x="-92" y="20" width="108" height="46" fill="transparent" pointer-events="all" onclick="openDetail('sun')"><title>Total solar — tap for history</title></rect>
           <rect class="node-tap" x="100" y="22" width="160" height="48" fill="transparent" pointer-events="all" onclick="openDetail('dc')"><title>DC MPPT — tap for history</title></rect>
-          <rect class="node-tap" x="-80" y="122" width="78" height="46" fill="transparent" pointer-events="all" onclick="openDetail('fron')"><title>Fronius — tap for history</title></rect>
+          <rect class="node-tap" x="-80" y="122" width="78" height="52" fill="transparent" pointer-events="all" onclick="openDetail('fron')"><title>Fronius — tap for history</title></rect>
           <rect class="node-tap" x="90" y="116" width="180" height="86" fill="transparent" pointer-events="all" onclick="openDetail('batt')"><title>Battery — tap for history</title></rect>
           <rect class="node-tap" x="30" y="368" width="130" height="48" fill="transparent" pointer-events="all" onclick="openDetail('ess')"><title>Household load — tap for history</title></rect>
           <rect class="node-tap" x="200" y="368" width="130" height="48" fill="transparent" pointer-events="all" onclick="openDetail('sur')"><title>Surplus — tap for history</title></rect>
@@ -1251,8 +1264,8 @@
   </script>
 
   <footer>
-    <div><b>Data source:</b> <span id="srcLine">connecting…</span> Read-only with <b>one</b> exception — the AC heating ON/OFF setpoints (validated server-side). It still cannot flip any switch directly. That write is an MQTT publish to the Cerbo broker, which a browser will only open from an <b>http</b> page on the farm LAN — this dashboard's own LAN address. On this public https link it is blocked as mixed content, which is deliberate: mobile data can watch the farm, it cannot touch the heating.</div>
-    <div style="margin-top:6px"><b>Honesty:</b> all numbers are raw dispatcher signals shown with their thresholds. When a feed is stale or a field is missing, you'll see a badge — never a guessed value. History is built from real samples — the farm relay keeps a rolling 24 h, and on the farm network the page also accrues its own. The Node-RED archive endpoints (<span class="mono">/api/bsf/*</span>) aren't wired, so there's no deeper backfill than that.</div>
+    <div><b>Data source:</b> <span id="srcLine">connecting…</span> Read-only with <b>one</b> exception — the AC heating ON/OFF setpoints (validated server-side). It still cannot flip any switch directly. That write is an MQTT publish to the Cerbo broker, which a browser will only open from an <b>http</b> page on the home LAN — this dashboard's own LAN address. On this public https link it is blocked as mixed content, which is deliberate: mobile data can watch the site, it cannot touch the heating.</div>
+    <div style="margin-top:6px"><b>Honesty:</b> all numbers are raw dispatcher signals shown with their thresholds. When a feed is stale or a field is missing, you'll see a badge — never a guessed value. History is built from real samples — the relay keeps a rolling 24 h, and on the home network the page also accrues its own. The Node-RED archive endpoints (<span class="mono">/api/bsf/*</span>) aren't wired, so there's no deeper backfill than that.</div>
     <div style="margin-top:6px;color:var(--dim)">BSF Solar Dispatch dashboard · companion to <span class="mono">schematic_energy_flow.svg</span> &amp; <span class="mono">dispatcher_logic.md</span>.</div>
   </footer>
 
@@ -1739,7 +1752,12 @@ function fetchFirst(urls){ return urls.reduce(function(p,u){ return p.catch(func
   var name=(typeof c.acSolarName==='string'&&c.acSolarName&&c.acSolarName!=='Fronius')?c.acSolarName:null;
   var noAc=c.hasAirCon===false, noHw=c.hwConnected===false;
   var src=(typeof c.sourceName==='string'&&c.sourceName&&c.sourceName!=='Cerbo')?c.sourceName:null;   /* 'Cerbo' is the author's box; a Selectronic site has none */
-  if(!name&&!noAc&&!noHw&&!src) return;
+  /* chargers: [] (written by deploy.py) = no DC chargers at all: every bit of solar is AC-coupled. The farm's page
+     still draws a DC box, a per-charger drill-down and per-tracker curtailment bars, and the relay still files a
+     whole-system curtailment flag under the farm's first tracker key - so a site with no MPPT would read "MPPT-288". */
+  var noDc=Array.isArray(c.chargers)&&c.chargers.length===0;
+  var acName=name||'AC-coupled solar';
+  if(!name&&!noAc&&!noHw&&!src&&!noDc) return;
   function byId(i){ return document.getElementById(i); }
   function hide(el){ if(el&&el.style.display!=='none') el.style.display='none'; }
   function txt(el,t){ if(el&&el.textContent!==t) el.textContent=t; }
@@ -1762,18 +1780,79 @@ function fetchFirst(urls){ return urls.reduce(function(p,u){ return p.catch(func
       var would=false; try{ would=!!(typeof state!=='undefined'&&state&&state.hw&&state.hw.hwState==='on'); }catch(e){}
       txt(byId('d_hw'), '\u2014');                                   /* the value slot is narrow: words here collide with the badge */
       txt(byId('b_hw'), would?'WOULD RUN':'WAITING');
-      txt(byId('d_hw_today'), would?'not connected \u00b7 surplus is there now':'not connected \u00b7 no switch yet');
+      txt(byId('d_hw_today'), would?'not connected \u00b7 surplus now':'not connected \u00b7 no switch yet');
       var box=byId('load_hw'); if(box&&box.classList.contains('on')) box.classList.remove('on');
       var pt=byId('p_hw'); if(pt&&pt.classList.contains('on')) pt.classList.remove('on');
+      txt(byId('m_hw'), '\u2014'); txt(byId('m_hw_sub'), 'not connected');
+      /* the Hot Water card's own status pill said a green "ON" for a load nothing can switch */
+      var pill=byId('hwState'); if(pill){ var pc=would?'st arming':'st off'; if(pill.className!==pc) pill.className=pc; txt(pill, would?'WOULD RUN':'WAITING'); }
+    }
+    if(noAc){
+      var ess=byId('wk_ess'), es=ess&&ess.closest?ess.closest('.metric'):null; es=es&&es.querySelector('.sub2'); txt(es,'excl. hot water');
+      /* footer: the page's one write path is the air-con setpoints; with no air-con it is read-only, full stop */
+      var sl=byId('srcLine'), par=sl&&sl.parentNode;
+      if(par&&!par.getAttribute('data-shaped')){ par.setAttribute('data-shaped','1');
+        while(sl.nextSibling) par.removeChild(sl.nextSibling);
+        par.appendChild(document.createTextNode(' Read-only: this page cannot switch anything.')); }
     }
   }
+  function applyNoDc(){
+    if(!noDc) return;
+    ['mpptBox','c_sun_arr','c_arr_bat','p_gen','p_gen2','drill'].forEach(function(i){ hide(byId(i)); });
+    hide(document.querySelector("rect.node-tap[onclick*=\"openDetail('dc')\"]"));
+    var all='all AC-coupled · '+acName;
+    txt(byId('m_pv_sub'), all);
+    var ws=byId('wk_solar'), wm=ws&&ws.closest?ws.closest('.metric'):null; txt(wm&&wm.querySelector('.sub2'), all);
+    try{ if(typeof NODES!=='undefined'&&NODES&&NODES.sun) NODES.sun.sub=all; }catch(e){}
+    /* curtailment: one whole-site figure, no per-tracker bars, no foregone estimate (it is built from per-tracker peaks) */
+    var fg=document.querySelector('.curt-fg'); hide(fg);
+    var ct=byId('curt_trk');
+    if(ct&&!ct.querySelector('.curt-sys')) ct.innerHTML='<div class="curt-none curt-sys">Whole-site figure, inferred: the battery is full and not charging while the sun is up, so the solar inverters are being held back. No DC chargers here, so no per-tracker breakdown.</div>';
+  }
   var busy=false;
-  function run(){ if(busy) return; busy=true; try{ apply(); }finally{ busy=false; } }
+  function run(){ if(busy) return; busy=true; try{ apply(); applyNoDc(); }finally{ busy=false; } }
   run();
   try{ new MutationObserver(run).observe(document.body,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['class']}); }catch(e){}
   setInterval(run, 5000);   /* belt and braces if an observer is unavailable */
 })();
 
+
+/* ---- sky shading follows the real sun ---------------------------------------------------------------------------
+   The farm page paints the sky band one fixed colour per theme: a sunrise sky in light mode, navy in dark mode, at
+   any hour. So a light-mode phone at night showed a daytime sky, and a dark-mode phone at noon a night sky. Here the
+   band shades by the sun's altitude at the displayed instant (live or scrubbed): day, twilight (sun 0..6 deg below
+   the horizon) or night, in the palette of the current theme. Inline stop colours beat the farm's CSS. Display only. */
+(function skyShade(){
+  if(typeof updateSky!=='function') return;
+  var PAL={ dark:{ day:['#1b3658','#36506f'], dusk:['#121a33','#3d2f3a'], night:['#080d18','#10192c'], lbl:{day:'#b8c4da',dusk:'#a8a0b0',night:'#5b6b86'} },
+            light:{ day:['#cfe3f5','#fbe9d2'], dusk:['#7f93b8','#e9c09a'], night:['#273650','#3d4d6c'], lbl:{day:'#8a93a8',dusk:'#5b6b86',night:'#c3cbe0'} } };
+  var mq=null; try{ mq=window.matchMedia('(prefers-color-scheme: light)'); }catch(e){}
+  var lastT=null;
+  function phase(t){
+    if(!window.SunCalc) return 'day';
+    var alt=SunCalc.getPosition(new Date(t), SKY.LAT, SKY.LON).altitude*57.2958;
+    return alt>-0.83?'day':(alt>-6?'dusk':'night');
+  }
+  function shade(t){
+    if(typeof window.__skyTimeOverride==='number') t=window.__skyTimeOverride;
+    if(!t) t=Date.now(); lastT=t;
+    var p=PAL[(mq&&mq.matches)?'light':'dark'], ph=phase(t), c=p[ph];
+    var g=document.getElementById('skyGrad'); if(!g) return;
+    var st=g.getElementsByTagName('stop');
+    if(st[0]&&st[0].style.stopColor!==c[0]) st[0].style.stopColor=c[0];
+    if(st[1]&&st[1].style.stopColor!==c[1]) st[1].style.stopColor=c[1];
+    var sk=document.getElementById('skyBack');
+    if(sk){ [].forEach.call(sk.querySelectorAll('.skylbl'),function(l){ if(l.style.fill!==p.lbl[ph]) l.style.fill=p.lbl[ph]; });
+            if(sk.getAttribute('data-sky')!==ph) sk.setAttribute('data-sky',ph); }
+  }
+  var inner=updateSky;
+  /* with the sun down updateSky drops the rays, but a dot already riding sun->panel kept floating in an empty sky
+     (seen at dusk while the inverters still report a few watts) - hide the sun-side dots with their rays */
+  function sunDots(ph){ var v=ph==='day'?'':'hidden';
+    ['p_fron_in','p_gen','p_gen2'].forEach(function(i){ var e=document.getElementById(i); if(e&&e.style.visibility!==v) e.style.visibility=v; }); }
+  updateSky=function(t){ inner(t); try{ shade(t); sunDots(phase(lastT)); }catch(e){} };
+  if(mq){ var re=function(){ try{ shade(lastT); }catch(e){} }; if(mq.addEventListener) mq.addEventListener('change',re); else if(mq.addListener) mq.addListener(re); }
+})();
 /* ---- bootstrap persisted ---- */
 samples=prune(load(HKEY)); events=prune(load(EKEY));
 
@@ -1851,8 +1930,8 @@ function lanCtlHint(prefix){
 function setSrc(mode){
   var el=$('srcLine'); if(!el) return;
   el.textContent = (mode==='mqtt')
-    ? 'live from the Cerbo broker over MQTT-over-WebSocket (farm network).'
-    : 'live via the farm relay — a sanitized read-only snapshot refreshed every ~15 s.';
+    ? 'live from the Cerbo broker over MQTT-over-WebSocket (home network).'
+    : 'live via the site relay — a sanitized read-only snapshot refreshed every ~15 s.';
 }
 /* Only the public relay (:8765) serves /solar/state — the LAN static host (:8780)
    serves this page but 404s on it. So probe before committing: switching blindly
