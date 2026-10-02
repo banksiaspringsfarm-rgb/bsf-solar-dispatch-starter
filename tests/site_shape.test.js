@@ -64,7 +64,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   // layout guards (static: jsdom has no layout). Measured in a real browser on 2026-10-02: "88.8%" and "100%" at 11 px bold are
   // inside the ring's 46 px hole; the title must start right of the ring (ring outer edge x=161).
   const soc=html.match(/<text id="d_soc"[^>]*font-size="([\d.]+)"/);
-  check('battery % font fits inside the ring (<= 11 px)', soc && +soc[1]<=11);
+  check('battery % readable but inside the ring (13-14 px)', soc && +soc[1]>=13 && +soc[1]<=14);
+  check('battery % shown as a whole number (a decimal will not fit the ring)', /\$\('d_soc'\)\.textContent=\(soc===null\?'–':Math\.round\(soc\)\+'%'\)/.test(html));
   const bt=html.match(/<text class="node-label" x="(\d+)" y="\d+" text-anchor="middle">Battery bank<\/text>/);
   check('"Battery bank" title centred clear of the ring (x >= 205)', bt && +bt[1]>=205);
   const ly=html.match(/txtCurtY=cb1\+(\d+), lblY=cb1\+(\d+),/);

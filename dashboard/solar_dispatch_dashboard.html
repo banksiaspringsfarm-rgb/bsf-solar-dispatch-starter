@@ -668,7 +668,7 @@
           <circle class="socring-bg" r="26" cx="0" cy="0"/>
           <circle id="socRing" class="socring-fg" r="26" cx="0" cy="0" transform="rotate(-90)"
             stroke-dasharray="163.4" stroke-dashoffset="163.4"/>
-          <text id="d_soc" x="0" y="4" text-anchor="middle" fill="#e8eef8" font-size="11" font-weight="700">–</text>
+          <text id="d_soc" x="0" y="5" text-anchor="middle" fill="#e8eef8" font-size="14" font-weight="800">–</text>
         </g>
         <text class="node-label" x="216" y="156" text-anchor="middle">flow</text>
         <text class="node-val" id="d_batt" x="216" y="176" text-anchor="middle" font-size="13">– W</text>
@@ -2787,7 +2787,7 @@ function render(snap){
   if($('d_totsolar')) $('d_totsolar').textContent=W(pv)+' W';   // Total Solar tile = pv_total (DC + Fronius)
   $('d_pv').textContent=W(pvdc)+' W';
   if($('d_fron')) $('d_fron').textContent=W(pvfron)+' W';
-  $('d_soc').textContent=(soc===null?'–':soc+'%');
+  $('d_soc').textContent=(soc===null?'–':Math.round(soc)+'%');
   $('d_batt').textContent=signW(batt)+' W';
   $('d_batt2').textContent=batt===null?' ':(batt>=0?'charging':'discharging');
   $('d_ess').textContent=W(essW)+' W';
