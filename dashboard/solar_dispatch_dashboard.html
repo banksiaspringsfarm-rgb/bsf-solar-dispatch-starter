@@ -4779,6 +4779,20 @@ setInterval(function(){ if(viewLive) updateSky(Date.now()); }, 20000);  // keep 
 paintConn();
 renderDiagnostic();   // build the connectivity timeline if the card was left expanded
 window.__bsf={ state:state, history:samples, reader:reader, updateSky:updateSky, render:render, currentSnapshot:currentSnapshot, renderDiagnostic:renderDiagnostic, diagModel:diagModel, SunCalc:window.SunCalc }; // for diagnostics
+
+// Reopened from a widget tap or a background tab: phones freeze a hidden tab's timers and connections, so the
+// page came back showing an hour-old "replaying" view until you pulled down to refresh (Steven, 2 Oct). Anyone
+// opening it should see live data with no gesture: hidden for over a minute, or restored from the back-forward
+// cache, means reload.
+(function(){
+  var hiddenAt = document.hidden ? Date.now() : 0;
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden){ hiddenAt = Date.now(); return; }
+    if(hiddenAt && Date.now() - hiddenAt > 60000){ location.reload(); return; }
+    hiddenAt = 0;
+  });
+  window.addEventListener('pageshow', function(e){ if(e.persisted) location.reload(); });
+})();
 </script>
 <!-- ============================================================================
      BSF Solar Dispatch — "buy me a coffee"  (DISPLAY ONLY — never touches dispatch)

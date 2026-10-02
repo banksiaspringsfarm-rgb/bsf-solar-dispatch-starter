@@ -70,5 +70,29 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
   check('"Battery bank" title centred clear of the ring (x >= 205)', bt && +bt[1]>=205);
   const ly=html.match(/txtCurtY=cb1\+(\d+), lblY=cb1\+(\d+),/);
   check('detail chart: time labels sit >= 10 px below the "curtailed" caption', ly && (+ly[2])-(+ly[1])>=10);
+  // Reopen refresh (2 Oct): a page hidden for over a minute, or restored from the back-forward cache, reloads itself
+  // so nobody has to pull down to refresh. Run the page's own snippet with a fake clock and a counted reload().
+  {
+    const m = html.match(/\(function\(\)\{\n  var hiddenAt = document\.hidden[\s\S]*?\}\)\(\);/);
+    check('reopen-refresh snippet present', !!m);
+    if (m) {
+      const run = (hiddenFor, persisted) => {
+        const dom2 = new JSDOM('<!doctype html><p>', {runScripts: 'outside-only'}); const w2 = dom2.window;
+        let now = 1e12, reloads = 0, hidden = false;
+        Object.defineProperty(w2.document, 'hidden', {get: () => hidden});
+        w2.Date.now = () => now;
+        w2.eval('(function(location){' + m[0] + '})({reload:function(){window.__r=(window.__r||0)+1}});');
+        if (persisted != null) { const e = new w2.Event('pageshow'); e.persisted = persisted; w2.dispatchEvent(e); }
+        else { hidden = true; w2.document.dispatchEvent(new w2.Event('visibilitychange'));
+               now += hiddenFor; hidden = false; w2.document.dispatchEvent(new w2.Event('visibilitychange')); }
+        return w2.__r || 0;
+      };
+      check('hidden 2 min then shown -> reloads', run(120000) === 1);
+      check('hidden 10 s then shown -> no reload (quick app switch)', run(10000) === 0);
+      check('restored from back-forward cache -> reloads', run(null, true) === 1);
+      check('normal first load (not from cache) -> no reload', run(null, false) === 0);
+    }
+  }
   console.log('\n'+fails+' failure(s)'); process.exit(fails?1:0);
 })();
+
