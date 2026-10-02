@@ -211,10 +211,10 @@ public class SolarWidget extends AppWidgetProvider {
         int batt = d != null ? d.batt : Integer.MIN_VALUE;
 
         // ── SOC clock-arc + centred % and state word ────────────────────────
-        rv.setImageViewBitmap(R.id.iv_ring, drawSocRing(soc, batt, night));
+        rv.setImageViewBitmap(R.id.iv_ring, drawSocRing(stale ? Integer.MIN_VALUE : soc, batt, night)   /* stale = empty grey ring: an old reading must not look like a healthy battery */);
         if (soc != Integer.MIN_VALUE) {
             rv.setTextViewText(R.id.tv_soc, soc + "%");
-            txt(rv, R.id.tv_soc, INK_L, INK_D, night);
+            txt(rv, R.id.tv_soc, stale ? DIM_L : INK_L, stale ? DIM_D : INK_D, night);
             rv.setTextViewText(R.id.tv_soc_glyph, socState(soc, batt));
             txt(rv, R.id.tv_soc_glyph, MUT_L, MUT_D, night);
         } else {
@@ -358,6 +358,26 @@ public class SolarWidget extends AppWidgetProvider {
         return "🔋 float";
     }
 
+    /**
+     * TRUE age of the data, not of the file it arrived in. The relay rewrites state.json every few
+     * seconds even when the dispatcher has gone silent (the farm, 2 Oct 2026: snapshot 1 min old,
+     * dispatcher status 2.4 h old — the widget said "1m ago", the dashboard said "stale 8628s").
+     * The relay stamps hw_age_s = how old the dispatcher's status was when it wrote the file, so the
+     * data's own time is ts − hw_age_s. Falls back to hw.ts, then to the file time.
+     */
+    static long dataTs(JSONObject snap) {
+        long ts = snap.optLong("ts", 0);
+        if (ts <= 0) return 0;
+        double age = snap.optDouble("hw_age_s", Double.NaN);
+        if (!Double.isNaN(age)) return ts - (long) Math.max(0, age * 1000);
+        JSONObject hw = snap.optJSONObject("hw");
+        if (hw != null) {
+            try { return Math.min(ts, java.time.Instant.parse(hw.optString("ts", "")).toEpochMilli()); }
+            catch (Exception ignored) { }
+        }
+        return ts;
+    }
+
     // ── HTTP fetch — /solar/state ────────────────────────────────────────────
     private FetchResult fetchSolarData(Context ctx) {
         try {
@@ -375,7 +395,7 @@ public class SolarWidget extends AppWidgetProvider {
             if (hw == null && ac == null) return null;
 
             FetchResult r = new FetchResult();
-            r.snapshotTs = snap.optLong("ts", 0);
+            r.snapshotTs = dataTs(snap);     // the DATA's time, not the file's — see dataTs()
             if (hw != null) {
                 r.soc     = optInt(hw, "soc");
                 r.pv      = optInt(hw, "pv_total");
