@@ -10,7 +10,8 @@ Today only the `hot_water` load can be a Shelly.
 ## What the dispatcher does with it
 
 - **ON** is sent with a **dead-man timer** (`toggle_after`). The relay switches itself OFF `deadman_s` seconds
-  (default 300) after the dispatcher last confirmed it should be on. The dispatcher re-confirms every 30 s.
+  (default 300) after the dispatcher last confirmed it should be on. The dispatcher re-confirms every 30 s, and
+  each re-confirm restarts the timer (measured on an Ogemray 25A, firmware 2.0.1: renewed at 60 s, self-OFF at 180 s).
   If the Pi, Node-RED or the Wi-Fi dies, the element is off within `deadman_s`.
 - On every deploy and Node-RED start, the relay's **power-on state is set to OFF**. A power cut never brings
   the element back on by itself.
@@ -86,6 +87,13 @@ current rating against the element: a 3.6 kW element draws about 15 A on a 25 A 
 - On the dashboard, the hot-water tile shows **OFF** with 0 W, not "not connected".
 - On a sunny morning with a full battery, it switches ON, the tile shows the relay's watts, and it stays on.
 - `mosquitto_sub -t 'bsf/hotwater/#' -v` shows `plug_state` and `plug_power` every 30 s.
+
+## Setting one up without the app
+
+A fresh relay broadcasts an open hotspot (`ShellyXXX-…` / `Ogemray25A-<MAC>`) with its API at `192.168.33.1`.
+From a computer joined to that hotspot, `POST http://192.168.33.1/rpc` with `Sys.SetConfig` (device name) and
+`WiFi.SetConfig`. For an **open** home network the firmware still demands a password field: send
+`"sta":{"ssid":"…","is_open":true,"pass":"","enable":true}`, or it answers `-103 Pass field required`.
 
 ## Bench test without hardware
 
