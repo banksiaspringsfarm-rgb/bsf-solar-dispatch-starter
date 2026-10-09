@@ -61,6 +61,8 @@ check("Data Persistence is wired: every log handler reaches its file, every /api
       all(dp[i]["type"] in ("file","http response","mqtt out","function") for i in fed if i in dp)
       and all(n["id"] in fed for n in dp.values() if n["type"] in ("file","http response"))
       and all(any(n.get("wires") and n["wires"][0]) for n in dp.values() if n["type"]=="http in"))
+check("file nodes that take msg.filename name the property (Node-RED 5 rejects a blank one)",
+      all(n.get("filename") for n in flows if n["type"]=="file" and n.get("filenameType")=="msg"))
 vic=cfg_with(dict(HW, driver="tuya", device_id="bf1"))
 check("Cerbo install: logs stay in /data/home/nodered/bsf-archive", json.dumps(deploy.build_flow(vic)[1]).count("/data/home/nodered/bsf-archive/")==3)
 ad=cfg_with(HW); ad["hardware"]["archive_dir"]="/srv/solar-logs/"
