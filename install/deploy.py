@@ -473,7 +473,7 @@ def cmd_publisher(cfg, args):
     py=sys.executable; sysname=platform.system()
     if subprocess.run([py,"-c","import paho.mqtt.client"], capture_output=True).returncode!=0:
         err(f"{py} has no paho-mqtt, so the relay would crash on start. Run deploy.py with the Python that has it "
-            "(on a Pi: ~/.venv-bsf/bin/python3 install/deploy.py publisher), or: {py} -m pip install -r publisher/requirements.txt")
+            f"(on a Pi: ~/.venv-bsf/bin/python3 install/deploy.py publisher), or: {py} -m pip install -r publisher/requirements.txt")
         return 1
     if sysname=="Darwin":
         plist=os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
