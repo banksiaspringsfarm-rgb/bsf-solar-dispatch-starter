@@ -471,6 +471,65 @@
     </div></div>
   </div>
 
+
+  <!-- FREEZERS — newest reading per sensor from state.json "freezers" (the relay carries what the site's freezer
+       monitor publishes on bsf/freezer/<name>/state). Hidden on a site without freezers. Display only. -->
+  <style>
+    #frzCard{display:none}
+    #frzCard .frz-sum{font-size:14px;color:var(--dim);margin:-2px 0 10px}
+    #frzCard .frz-sum.bad{color:var(--red);font-weight:700}
+    #frzRows{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+    #frzRows .frz{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:88px}
+    #frzRows .frz .n{font-size:13px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #frzRows .frz .t{font-size:28px;font-weight:800;line-height:1.15;margin:4px 0 2px;font-variant-numeric:tabular-nums}
+    #frzRows .frz .m{font-size:12px;color:var(--dim)}
+    #frzRows .frz.ok .t{color:var(--green)} #frzRows .frz.amber .t{color:var(--amber)}
+    #frzRows .frz.warm{border-color:var(--red)} #frzRows .frz.warm .t{color:var(--red)}
+    #frzRows .frz.stale .t{color:var(--mut)} #frzRows .frz .lowbatt{color:var(--red);font-weight:700}
+  </style>
+  <div class="card" id="frzCard">
+    <h2>🧊 Freezers</h2>
+    <div class="frz-sum" id="frzSum"></div>
+    <div id="frzRows"></div>
+  </div>
+  <script>
+  (function(){
+    var WARM=-12, CHILLY=-15, STALE_S=600, LOW_BATT=50;
+    function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+    function ago(s){ return s<90?'just now':(s<5400?Math.round(s/60)+' min ago':Math.round(s/3600)+' h ago'); }
+    function paint(fr){
+      var card=document.getElementById('frzCard'); if(!card) return;
+      var names=fr?Object.keys(fr).sort():[];
+      if(!names.length){ card.style.display='none'; return; }
+      card.style.display='block';
+      var now=Date.now()/1000, warm=0, stale=0, low=0, html='';
+      names.forEach(function(n){
+        var r=fr[n], age=Math.max(0, now-(r.ts||0)), t=+r.temp_c, cls;
+        if(age>STALE_S){ cls='stale'; stale++; }
+        else if(t>WARM){ cls='warm'; warm++; }
+        else if(t>CHILLY){ cls='amber'; }
+        else cls='ok';
+        var b=(typeof r.battery==='number')?r.battery:null; if(b!==null&&b<LOW_BATT) low++;
+        html+='<div class="frz '+cls+'"><div class="n">'+esc(n)+'</div><div class="t">'+(isFinite(t)?t.toFixed(1):'—')+'°</div>'
+            +'<div class="m">'+(cls==='stale'?'not heard · ':'')+ago(age)
+            +(b!==null?' · <span class="'+(b<LOW_BATT?'lowbatt':'')+'">🔋 '+Math.round(b)+'%</span>':'')+'</div></div>';
+      });
+      document.getElementById('frzRows').innerHTML=html;
+      var sum=document.getElementById('frzSum'), bits=[];
+      if(warm) bits.push(warm+' above '+WARM+' °C');
+      if(stale) bits.push(stale+' not heard');
+      if(low) bits.push(low+' low battery');
+      sum.className='frz-sum'+((warm||stale)?' bad':'');
+      sum.textContent=bits.length?bits.join(' · '):(names.length+' freezer'+(names.length>1?'s':'')+', all cold');
+    }
+    function poll(){
+      fetchFirst(['/solar/state','state.json']).then(function(s){ paint(s&&s.freezers); }).catch(function(){});
+    }
+    poll(); setInterval(poll, 30000);
+    document.addEventListener('visibilitychange',function(){ if(!document.hidden) poll(); });
+  })();
+  </script>
+
   <!-- DIAGRAM -->
   <div class="card">
     <h2>Energy flow</h2>

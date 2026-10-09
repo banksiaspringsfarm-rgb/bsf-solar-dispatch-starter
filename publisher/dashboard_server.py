@@ -129,7 +129,7 @@ PUBLIC_FILES = {"": "solar_dispatch_dashboard.html", "solar_dispatch_dashboard.h
                 "dashboard-config.js": "dashboard-config.js", "state.json": "state.json",
                 "history.json": "history.json", "weekly.json": "weekly.json"}
 PUBLIC_TYPES = {".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".json": "application/json"}
-STATE_KEYS = ("ok", "ts", "hw", "ac", "hw_age_s", "ac_age_s", "loads", "weekly", "today", "source")
+STATE_KEYS = ("ok", "ts", "hw", "ac", "hw_age_s", "ac_age_s", "loads", "weekly", "today", "source", "freezers")
 PRIVATE_SUBKEYS = ("device_id", "local_key", "local_ip", "ip", "mac", "tuya_lan", "chargers_raw")
 # Occupancy is the thing that must never leave the house: a timeline of anyone_home is a burglar's calendar.
 # Matched as a PATTERN at every depth, in every JSON file served, so a new presence field added upstream is

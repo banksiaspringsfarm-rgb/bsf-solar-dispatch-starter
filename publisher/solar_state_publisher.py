@@ -752,6 +752,14 @@ SHELLY_HW       = _load_driver("hot_water") == "shelly"
 SHELLY_METERED  = bool((_LOADS.get("hot_water") or {}).get("metered", True))
 SHELLY_FRESH_MS = 120 * 1000
 SHELLY_TOPICS   = ("bsf/hotwater/plug_state", "bsf/hotwater/plug_power")
+
+# ---- freezers (optional, display-only) ----------------------------------------
+# A site may also run a freezer monitor that publishes bsf/freezer/<name>/state once a minute
+# ({"ts","sensor","temp_c","humidity","battery",...}; e.g. Inkbird Bluetooth sensors read by the Pi).
+# The relay carries the newest reading per sensor into state.json as "freezers", with its age, so the
+# dashboard can show them next to the solar. A site without one simply has no "freezers" key.
+FREEZER_TOPIC = "bsf/freezer/+/state"
+_freezers = {}
 _shelly = {"on": None, "on_ts": 0, "w": None, "w_ts": 0}
 
 
@@ -878,6 +886,7 @@ def on_connect(client, userdata, flags, rc):
     if SHELLY_HW:
         for t in SHELLY_TOPICS:
             client.subscribe(t, 0)
+    client.subscribe(FREEZER_TOPIC, 0)
     send_keepalive()                # kick the N/ tree so per-charger data starts flowing
     print(f"[publisher] connected rc={rc}, subscribed {len(TOPICS)}+{len(_NATIVE_MAP)} topics", flush=True)
 
@@ -913,6 +922,12 @@ def on_message(client, userdata, msg):
     topic = msg.topic
     if topic in _NATIVE_MAP:        # native Victron per-charger reading (Phase 3)
         update_charger(topic, payload)
+        return
+    if topic.startswith("bsf/freezer/") and topic.endswith("/state"):
+        if isinstance(payload, dict) and _wnum(payload.get("temp_c")) is not None and _wnum(payload.get("ts")) is not None:
+            rec = {k: payload.get(k) for k in ("ts", "sensor", "temp_c", "humidity", "battery", "probe", "rssi")}
+            with lock:
+                _freezers[str(payload.get("sensor") or topic.split("/")[2])] = rec
         return
     if topic in SHELLY_TOPICS:
         with lock:
@@ -1012,6 +1027,8 @@ def writer_loop():
                 "loads": loads,
                 "weekly": wk_summary,
                 "presence": presence, "presence_age_s": presence_age,
+                **({"freezers": {n: dict(r, age_s=max(0, int(t / 1000 - r["ts"]))) for n, r in sorted(_freezers.items())}}
+                   if _freezers else {}),
                 "source": "cerbo-mqtt-relay",
             }
             if t - _last_sample >= SAMPLE_EVERY_MS and (hw or ac):
