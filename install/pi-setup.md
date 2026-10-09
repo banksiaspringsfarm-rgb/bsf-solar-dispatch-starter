@@ -75,7 +75,10 @@ Manage palette or `cd ~/.node-red && npm i node-red-contrib-tuya-smart-device`.
 
 Clone this repo **on the Pi** (`git clone …; cd bsf-solar-dispatch-starter`), then the normal
 runbook: `config.json` with `hardware.inverter.kind = "selectronic"` (or `victron`),
-`python3 install/deploy.py check`, `flow --deploy`, `publisher`, `dashboard`, `smoke`.
+`~/.venv-bsf/bin/python3 install/deploy.py check`, `flow --deploy`, `dashboard`, `publisher`, `smoke`.
+Use the venv's Python (it has paho-mqtt): the services are installed to run under whichever Python runs
+`deploy.py`, and `publisher` refuses a Python without paho-mqtt. Run `dashboard` before `publisher`, which copies
+the dashboard config into the served folder.
 On a Selectronic install `publisher` also installs the Select.live bridge service.
 
 `deploy.py publisher` on Linux also writes a `bsf-dashboard-http` user unit (static server on

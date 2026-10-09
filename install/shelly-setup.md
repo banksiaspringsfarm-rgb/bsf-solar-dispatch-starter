@@ -74,6 +74,31 @@ python3 install/deploy.py publisher --force
 In Node-RED a new tab, **Shelly — Hot Water**, appears. Its status dots show the last command sent and the
 relay's state and watts.
 
+## Two boosters: a primary and a secondary
+
+A second Shelly element goes in as `role: "hot_water_2"` (its own `topic_prefix`). It is a **secondary**:
+
+- it only ever runs while Booster 1 is on, and only after Booster 1 has run `min_primary_on_ms` (2 min);
+- it needs a nearly full battery (`soc_on` 95 %, off below `soc_off` 90 %), and either `surplus_on_w` spare
+  after Booster 1 (default: its rating + 600 W) or the panels being throttled (curtailed);
+- it sheds first: at once if Booster 1 goes off, the battery discharges more than `batt_trip_w` (2 kW),
+  the total load passes `max_total_w`, or it leaves the daytime window; after `sustain_off_ms` if the panels
+  stop covering both. After it sheds it waits `min_off_ms` (10 min) before trying again.
+
+The dispatcher sees the two boosters as one hot-water load (their watts added), so Booster 2 can never make it
+shed Booster 1. Settings go in `dispatcher.hot_water_2`:
+
+```json
+"hot_water_2": { "max_total_w": 10000, "soc_on": 95, "soc_off": 90, "batt_trip_w": 2000 }
+```
+
+**`max_total_w` is the decision that matters.** On an AC-coupled site the panels feed loads directly, so the
+total can pass the inverter's rating while the sun covers it. But if the panels drop out (cloud, or the
+AC-coupled inverters tripping), the inverter carries everything until the dispatcher sheds, within about 10 s.
+Set it to what your inverter can carry for that long, not its continuous rating. It defaults to the continuous
+rating, which means Booster 2 rarely runs. `safety_cap_w` must be above it, so Booster 2 always sheds before
+the safety cap trips Booster 1.
+
 ## 3. Install (electrician)
 
 The relay is hardwired: in Australia a licensed electrician fits it. It is a bare module, not weather-rated,

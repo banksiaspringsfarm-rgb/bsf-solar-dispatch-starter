@@ -156,7 +156,7 @@ dashboard for a few days first.
 ## What this *won't* do
 
 - ❌ Won't run on inverters other than Victron (Cerbo / Venus OS) or Selectronic SP PRO (Select.live). No SMA, Fronius-only, Sungrow… yet.
-- ❌ Won't control Zigbee or Z-Wave devices. Shelly is supported for the hot water only (air-con and pumps are still Tuya).
+- ❌ Won't control Zigbee or Z-Wave devices. Shelly is supported for the hot water only (one element, or two with the second as a secondary). Air-con and pumps are still Tuya.
 - ❌ Won't do true *cooling* dispatch as-shipped — it ships heating-direction; reversing it is a documented manual step.
 - ❌ Won't sign in to Tuya or create accounts for you — those sign-ups are yours to do.
 - ❌ Won't work without Node-RED (on the Cerbo, or on the Pi for a Selectronic install), or without a LAN host for the relay.

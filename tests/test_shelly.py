@@ -7,9 +7,9 @@ def load(name, rel):
     spec=importlib.util.spec_from_file_location(name, os.path.join(ROOT, rel)); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 sys.argv=["deploy.py","check"]; deploy=load("deploy","install/deploy.py")
 fails=0
-def check(name, cond):
+def check(name, cond, detail=""):
     global fails
-    print(("  ok " if cond else "  FAIL ")+name); fails+=(0 if cond else 1)
+    print(("  ok " if cond else "  FAIL ")+name+("" if cond or detail=="" else "  -> "+str(detail)[:300])); fails+=(0 if cond else 1)
 
 HW={"role":"hot_water","label":"Booster 1","driver":"shelly","rated_w":3600,"metered":True,
     "shelly":{"topic_prefix":"glen-eden/booster1","switch_id":0,"deadman_s":300}}
@@ -23,7 +23,7 @@ check("a Tuya load with no driver field is still Tuya", deploy._driver({"role":"
 bad=dict(HW, shelly=dict(HW["shelly"], topic_prefix="shelly/#"))
 check("a wildcard topic prefix is a blocker", any("topic_prefix" in i for i in issues(cfg_with(bad))))
 check("a blank topic prefix is a blocker", any("topic_prefix" in i for i in issues(cfg_with(dict(HW, shelly={})))))
-check("Shelly on the air-con is a blocker (hot water only today)", any("only the hot_water" in i for i in issues(cfg_with(dict(HW, role="air_con")))))
+check("Shelly on the air-con is a blocker (hot water only today)", any("only hot_water" in i for i in issues(cfg_with(dict(HW, role="air_con")))))
 check("a dead-man shorter than 120 s is a blocker", any("deadman_s" in i for i in issues(cfg_with(dict(HW, shelly=dict(HW["shelly"], deadman_s=30))))))
 check("no rated_w is a blocker (it stands in for the meter)", any("rated_w" in i for i in issues(cfg_with(dict(HW, rated_w=0)))))
 check("an unknown driver is a blocker", any("driver" in i for i in issues(cfg_with(dict(HW, driver="zigbee")))))
@@ -102,6 +102,100 @@ else:
     check("a power-only event before the switch state is known publishes nothing", r[4][0] is None)
     check("events update watts on the known state, then OFF goes to 0", r[4][1][1]["payload"]==3500 and r[4][2][1]["payload"]==0 and r[4][3][0]["payload"] is False and r[4][3][1]["payload"]==0)
     check("RPC errors, Switch.Set acks and garbage publish nothing", r[5]==[None,None,None])
+
+# ---- Booster 2 (secondary) ----
+TWO=cfg_with(HW, dict(HW, role="hot_water_2", label="Booster 2", shelly=dict(HW["shelly"], topic_prefix="glen-eden/booster2")))
+TWO["dispatcher"].update({"safety_cap_w":11000, "hot_water_2":{"max_total_w":10000}})
+check("two Shelly boosters with sane caps: no blockers", not issues(TWO))
+t2=json.loads(json.dumps(TWO)); t2["dispatcher"]["safety_cap_w"]=9000
+check("safety cap not above Booster 2's total-load limit is a blocker (Booster 2 must shed first)", any("must be > dispatcher.hot_water_2.max_total_w" in i for i in issues(t2)))
+t2=json.loads(json.dumps(TWO)); t2["loads"][1]["shelly"]["topic_prefix"]="glen-eden/booster1"
+check("both boosters on one prefix is a blocker", any("same shelly.topic_prefix" in i for i in issues(t2)))
+t2=json.loads(json.dumps(TWO)); t2["loads"][0]=dict(t2["loads"][0], driver="tuya")
+check("Booster 2 on a Shelly needs Booster 1 on a Shelly", any("Booster 1" in i for i in issues(t2)))
+t2=json.loads(json.dumps(TWO)); del t2["dispatcher"]["hot_water_2"]; t2["dispatcher"]["safety_cap_w"]=11000
+check("default total-load limit = inverter rating, and it warns that Booster 2 will rarely run", deploy._hw2_cfg(t2)["max_total_w"]==5000 and any("rarely" in w for w in deploy.validate(t2)[1]))
+two,_=deploy.hot_water_2_transform(json.loads(json.dumps(flows)), TWO)
+ids2={n["id"] for n in two}
+check("two boosters: each adapter tab has its own ids", {"shelly.hw.cmd","shelly.hw2.cmd","hw2.fn","hw2.combine"}<=ids2 and len(ids2)==len(two))
+check("Booster 1 reports on b1 topics, Booster 2 on b2 topics",
+      "bsf/hotwater/b1/plug_state" in next(n for n in two if n["id"]=="shelly.hw.status")["func"]
+      and "bsf/hotwater/b2/plug_state" in next(n for n in two if n["id"]=="shelly.hw2.status")["func"])
+check("the dispatcher/lockout link-out reaches Booster 1 only", next(n for n in two if n["id"]=="2e16c9d59bfa60f3")["links"]==["b3ca21a4de4a338b","shelly.hw.linkin"])
+check("the secondary dispatcher reaches Booster 2 only", next(n for n in two if n["id"]=="hw2.linkout")["links"]==["shelly.hw2.linkin"] and next(n for n in two if n["id"]=="shelly.hw2.linkin")["links"]==["hw2.linkout"])
+check("every MQTT subscription is a valid topic filter (wildcards fill a whole level)",
+      all(all(seg in ("+","#") or ("+" not in seg and "#" not in seg) for seg in n["topic"].split("/")) for n in two if n["type"]=="mqtt in"))
+check("Booster 2 adapter listens on its own prefix", {n["topic"] for n in two if n.get("z")=="shelly.hw2.tab" and n["type"]=="mqtt in"}=={"bsf-dispatch-glen-eden-booster2/rpc","glen-eden/booster2/events/rpc"})
+check("two-booster flow: every function passes node --check", deploy._node_check(two) in ([],None))
+fn2={n["id"]:n["func"] for n in two if n["type"]=="function"}
+SIM=r'''
+// fake clock + shared flow context; steps: [{at, msg}] -> outputs per step
+const fs=require('fs'); const cases=JSON.parse(fs.readFileSync(0,'utf8')); const res=[];
+for (const c of cases) {
+  let T=1e12; class D extends Date { constructor(...a){ a.length?super(...a):super(T); } static now(){ return T; } }
+  const fstore={}, flow={get:k=>fstore[k], set:(k,v)=>{fstore[k]=v;}};
+  const ctx={}; const mk=id=>{ctx[id]=ctx[id]||{}; const s=ctx[id]; return {get:k=>s[k], set:(k,v)=>{s[k]=v;}}; };
+  const fns={}; for (const [id,src] of Object.entries(c.funcs)) fns[id]=new Function('msg','context','node','flow','Date',src);
+  const out=[];
+  for (const st of c.steps) { T=1e12+st.at; const r=fns[st.fn](st.msg, mk(st.fn), {status(){},warn(){}}, flow, D); out.push(r); }
+  res.push(out);
+}
+process.stdout.write(JSON.stringify(res));'''
+def sim(cases):
+    r=subprocess.run([node,"-e",SIM],input=json.dumps(cases),capture_output=True,text=True,timeout=30)
+    assert r.returncode==0, r.stderr[-800:]
+    return json.loads(r.stdout)
+if node:
+    F={"c":fn2["hw2.combine"],"s":fn2["hw2.fn"]}
+    def plug(at,b,on,w): return [{"at":at,"fn":"c","msg":{"topic":"bsf/hotwater/%s/plug_state"%b,"payload":"true" if on else "false"}},
+                                  {"at":at,"fn":"c","msg":{"topic":"bsf/hotwater/%s/plug_power"%b,"payload":str(w)}}]
+    def status(at, **kw):
+        s=dict(mode="DISPATCH",hwState="on",soc=100,surplus_now=11400,ac_load=4150,batt_power=100,curtailed=False,stale=[]); s.update(kw)
+        return {"at":at,"fn":"s","msg":{"topic":"bsf/hotwater/status","payload":json.dumps(s)}}
+    def cmds(rs): return [r[0]["payload"]["set"] for r in rs if r and isinstance(r[0], dict)]
+    def ticks(t0, n, b2=False, **kw):   # dispatcher status every 10 s; both relays report every 30 s, like the adapters
+        out=[]
+        for i in range(n):
+            at=t0+i*10000
+            if i%3==0: out+=plug(at,"b1",True,3550)+plug(at,"b2",b2,3500 if b2 else 0)
+            out.append(status(at, **kw))
+        return out
+    # Booster 1 on with 3550 W from t=0; good sun. Booster 2 must wait 120 s of Booster 1, then 60 s of sustain.
+    base=plug(0,"b1",True,3550)+plug(0,"b2",False,0)
+    steps=ticks(0, 20)
+    r=sim([{"funcs":F,"steps":steps}])[0]
+    on_at=[s["at"] for s,x in zip(steps,r) if s["fn"]=="s" and x and x[0] and x[0]["payload"]["set"]]
+    check("Booster 2 waits for Booster 1 to run 120 s plus a 60 s sustain, then turns ON once", on_at==[180000], on_at)
+    comb=[x for s,x in zip(steps,r) if s["fn"]=="c"]
+    check("combiner: dispatcher sees Booster 1's 3550 W as the hot-water plug", comb[-1][0]==[{"topic":"bsf/hotwater/plug_state","payload":True},{"topic":"bsf/hotwater/plug_power","payload":3550}])
+    r=sim([{"funcs":F,"steps":plug(0,"b1",True,3550)+plug(0,"b2",True,3500)}])[0]
+    check("combiner: both on => plug_power is the sum", r[-1][0][1]["payload"]==7050 and r[-1][0][0]["payload"] is True)
+    r=sim([{"funcs":F,"steps":plug(0,"b1",True,3550)+plug(0,"b2",True,3500)+plug(200000,"b1",True,3550)}])[0]
+    check("combiner: a booster not heard from for 150 s drops out of the sum", r[-1][0][1]["payload"]==3550)
+    # running both, then each way Booster 2 must stop
+    run=ticks(0, 19)+plug(185000,"b2",True,3500)
+    def after(extra): return sim([{"funcs":F,"steps":run+extra}])[0][len(run):]
+    check("Booster 1 OFF => Booster 2 OFF at once", cmds(after([status(190000, hwState="off")]))==[False])
+    check("battery discharging > 2 kW => Booster 2 OFF at once", cmds(after([status(190000, batt_power=-2500)]))==[False])
+    check("total load over the limit => Booster 2 OFF at once", cmds(after([status(190000, ac_load=10400)]))==[False])
+    check("outside the daytime window => Booster 2 OFF at once", cmds(after([status(190000, mode="LOCKOUT")]))==[False])
+    check("SOC below soc_off => Booster 2 OFF at once", cmds(after([status(190000, soc=89)]))==[False])
+    check("dispatcher silent > 60 s => Booster 2 OFF on the tick", cmds(after([{"at":260000,"fn":"s","msg":{"topic":"tick"}}]))==[False])
+    weak=ticks(190000, 9, b2=True, surplus_now=6400)   # 6400-3550-3500 = -650 spare
+    rw=after(weak); offs=[st["at"] for st,x in zip(weak,rw) if x and isinstance(x[0],dict)]
+    check("panels can't cover both (spare < 0, not curtailed) => OFF only after the 60 s sustain", cmds(rw)==[False] and offs==[250000], offs)
+    check("...while curtailed it holds ON (the panels still have headroom)", cmds(after(ticks(190000, 12, b2=True, surplus_now=6400, curtailed=True)))==[])
+    check("a 10 s dip does not touch Booster 2", cmds(after(ticks(190000, 1, b2=True, surplus_now=6400)+ticks(200000, 12, b2=True)))==[])
+    # after an OFF it stays off for min_off (10 min) even in full sun, then comes back
+    seq=[status(190000, batt_power=-2500)]+ticks(200000, 80)
+    re=after(seq); ons=[st["at"] for st,x in zip(seq,re) if x and isinstance(x[0],dict) and x[0]["payload"]["set"]]
+    check("after an OFF Booster 2 stays off 10 min, then comes back in full sun", ons[:1]==[190000+600000+60000], ons[:1])
+    lo=sim([{"funcs":F,"steps":[status(0, mode="LOCKOUT", hwState="off")]+[status(t*10000, mode="LOCKOUT", hwState="off") for t in range(1,61)]}])[0]
+    check("outside the window it re-sends OFF every 5 min", cmds(lo)==[False,False,False] , cmds(lo))
+    check("never ON when SOC < soc_on (95%)", cmds(sim([{"funcs":F,"steps":ticks(0, 40, soc=94)}])[0])==[])
+    check("never ON when total load + Booster 2 > limit", cmds(sim([{"funcs":F,"steps":ticks(0, 40, ac_load=7000)}])[0])==[])
+    check("never ON with too little spare and no curtailment", cmds(sim([{"funcs":F,"steps":ticks(0, 40, surplus_now=7000)}])[0])==[])
+    check("...but ON with the same spare when curtailed (battery full, panels throttled)", cmds(sim([{"funcs":F,"steps":ticks(0, 40, surplus_now=7000, curtailed=True)}])[0])==[True])
 
 # ---- relay (publisher) ----
 PROBE=r'''

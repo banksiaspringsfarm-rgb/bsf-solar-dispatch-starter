@@ -19,6 +19,7 @@ ROOT     = os.path.dirname(HERE)
 CFG_PATH = os.path.join(ROOT, "config.json")
 SRC_FLOW = os.path.join(ROOT, "node-red", "bsf-solar-dispatch.flow.json")
 SHELLY_HW_TAB = os.path.join(ROOT, "node-red", "shelly-hot-water.flow.json")
+HW2_TAB  = os.path.join(ROOT, "node-red", "hot-water-2.flow.json")
 SRC_PUB  = os.path.join(ROOT, "publisher", "solar_state_publisher.py")
 DASH_DIR = os.path.join(ROOT, "dashboard")
 APK      = os.path.join(ROOT, "widget", "android", "BSF-Solar-Dispatch-v3.apk")
@@ -166,7 +167,7 @@ def validate(cfg):
         role=l.get("role"); drv=_driver(l)
         if drv not in ("tuya","shelly"): issues.append(f"loads[{role}].driver '{drv}' — must be 'tuya' or 'shelly'.")
         if drv!="shelly": continue
-        if role!="hot_water": issues.append(f"loads[{role}].driver='shelly': only the hot_water load can use a Shelly today.")
+        if role not in ("hot_water","hot_water_2"): issues.append(f"loads[{role}].driver='shelly': only hot_water / hot_water_2 can use a Shelly today.")
         sc=_shelly_cfg(l)
         if not SHELLY_PREFIX_RE.match(sc["topic_prefix"]):
             issues.append(f"loads[{role}].shelly.topic_prefix '{sc['topic_prefix']}' — set it to the Shelly's MQTT topic prefix (letters, digits, - _ /; no + or #).")
@@ -176,6 +177,19 @@ def validate(cfg):
             issues.append(f"loads[{role}].shelly.deadman_s must be 120-3600 s (it is refreshed every 30 s while ON).")
         if not _num(l.get("rated_w"),0)>0:
             issues.append(f"loads[{role}].rated_w must be the element's watts — it stands in for the meter while the relay is ON.")
+    L=_loads_by_role(cfg); h2=L.get("hot_water_2")
+    if h2 and _driver(h2)=="shelly":
+        if _driver(L.get("hot_water"))!="shelly":
+            issues.append("loads[hot_water_2] is a Shelly: Booster 1 (loads[hot_water]) must be a Shelly too.")
+        elif _shelly_cfg(h2)["topic_prefix"]==_shelly_cfg(L["hot_water"])["topic_prefix"]:
+            issues.append("hot_water and hot_water_2 have the same shelly.topic_prefix — each relay needs its own.")
+        c2=_hw2_cfg(cfg)
+        if c2["soc_on"]<=c2["soc_off"]: issues.append(f"dispatcher.hot_water_2.soc_on ({c2['soc_on']}) must be > soc_off ({c2['soc_off']}).")
+        if c2["surplus_on_w"]<=c2["surplus_off_w"]: issues.append("dispatcher.hot_water_2.surplus_on_w must be > surplus_off_w.")
+        if _num(D.get("safety_cap_w"),4200)<=c2["max_total_w"]:
+            issues.append(f"dispatcher.safety_cap_w ({_num(D.get('safety_cap_w'),4200)}) must be > dispatcher.hot_water_2.max_total_w ({c2['max_total_w']}): Booster 2 has to shed before the safety cap trips Booster 1.")
+        if c2["max_total_w"] < _num(L["hot_water"].get("rated_w"),0)+c2["rated_w"]:
+            warns.append(f"dispatcher.hot_water_2.max_total_w ({c2['max_total_w']} W) is below both boosters together: Booster 2 will rarely if ever run.")
     kind=_inverter_kind(cfg)
     if kind not in ("victron","selectronic"): issues.append(f"hardware.inverter.kind '{kind}' — must be 'victron' or 'selectronic'.")
     if kind=="selectronic":
@@ -260,16 +274,12 @@ def selectronic_transform(flows, prefix="sel"):
         else: out.append(n)
     return out, swapped
 
-def shelly_transform(flows, load):
-    """Swap the Tuya hot-water node for the Shelly adapter tab (node-red/shelly-hot-water.flow.json).
-    The dispatcher + lockout loop already send their plug commands through a link-out; the link-in that
-    fed the Tuya node is removed and the adapter's own link-in takes its place on that link-out, so
-    every command reaches the Shelly and nothing reaches a Tuya node with no device."""
-    broker=next((n["id"] for n in flows if n.get("type")=="mqtt-broker"), None)
-    if not broker: raise RuntimeError("flow has no mqtt-broker node for the Shelly adapter")
+def _shelly_tab(load, broker, ids="shelly.hw.", label="Shelly — Hot Water", out="bsf/hotwater/plug_"):
+    """The adapter tab for one Shelly, from node-red/shelly-hot-water.flow.json. ids/label/out let a second
+    booster get its own copy (node ids, tab name, and the topics it reports on)."""
     sc=_shelly_cfg(load)
     if not SHELLY_PREFIX_RE.match(sc["topic_prefix"]):
-        raise RuntimeError("loads[hot_water].shelly.topic_prefix is not set (run `deploy.py check`)")
+        raise RuntimeError("loads[%s].shelly.topic_prefix is not set (run `deploy.py check`)" % load.get("role"))
     tm={"__SHELLY_PREFIX__":sc["topic_prefix"], "__SHELLY_SWITCH_ID__":str(int(sc["switch_id"])),
         "__SHELLY_SRC__":"bsf-dispatch-"+sc["topic_prefix"].replace("/","-"),
         "__SHELLY_DEADMAN_S__":str(int(sc["deadman_s"])),
@@ -277,7 +287,46 @@ def shelly_transform(flows, load):
         "__SHELLY_RATED_W__":str(int(_num(load.get("rated_w"),0))), "__SHELLY_BROKER__":broker}
     raw=open(SHELLY_HW_TAB).read()
     for k,v in tm.items(): raw=raw.replace(k,v)
-    tab=json.loads(raw)
+    raw=raw.replace("shelly.hw.", ids).replace("Shelly — Hot Water", label).replace("bsf/hotwater/plug_", out)
+    return json.loads(raw)
+
+# dispatcher.hot_water_2 defaults: Booster 2 only joins Booster 1, only on a nearly full battery, sheds first.
+HW2_DEFAULTS = {"surplus_on_w": None, "surplus_off_w": 0, "soc_on": 95, "soc_off": 90, "max_total_w": None,
+                "batt_trip_w": 2000, "sustain_on_ms": 60000, "sustain_off_ms": 60000,
+                "min_primary_on_ms": 120000, "min_off_ms": 600000}
+def _hw2_cfg(cfg):
+    D=(cfg.get("dispatcher") or {}).get("hot_water_2") or {}
+    L2=_loads_by_role(cfg).get("hot_water_2") or {}
+    c={k:(D.get(k) if _num(D.get(k),None) is not None else v) for k,v in HW2_DEFAULTS.items()}
+    c["rated_w"]=_num(L2.get("rated_w"),0)
+    if c["surplus_on_w"] is None: c["surplus_on_w"]=c["rated_w"]+600            # Booster 2 + 600 W still spare
+    if c["max_total_w"] is None:  c["max_total_w"]=int(_num(_g(cfg,"hardware.inverter.rating_kw"),5.0)*1000)
+    return c
+
+def hot_water_2_transform(flows, cfg):
+    """Booster 2 = a secondary load that only runs alongside Booster 1. Both report on their own topics
+    (bsf/hotwater/b1|b2/plug_*); a combiner feeds the dispatcher their SUM on the original plug topics, so
+    its surplus is always 'solar minus the house' and Booster 2 can never make it shed Booster 1. The
+    secondary dispatcher (node-red/hot-water-2.flow.json) reads the dispatcher's status and switches
+    Booster 2 through its own adapter; it sheds before Booster 1 does."""
+    L=_loads_by_role(cfg); hw1,hw2=L["hot_water"],L["hot_water_2"]
+    flows,dropped=shelly_transform(flows, hw1, out="bsf/hotwater/b1/plug_")
+    broker=next(n["id"] for n in flows if n.get("type")=="mqtt-broker")
+    tab2=_shelly_tab(hw2, broker, ids="shelly.hw2.", label="Shelly — Hot Water 2", out="bsf/hotwater/b2/plug_")
+    raw=open(HW2_TAB).read().replace("__HW2_BROKER__", broker).replace("__HW2_CFG__", json.dumps(json.dumps(_hw2_cfg(cfg)))[1:-1])   # embedded inside JSON strings
+    sec=json.loads(raw)
+    next(n for n in tab2 if n["id"]=="shelly.hw2.linkin")["links"]=["hw2.linkout"]
+    next(n for n in sec if n["id"]=="hw2.linkout")["links"]=["shelly.hw2.linkin"]
+    return flows+tab2+sec, dropped
+
+def shelly_transform(flows, load, out="bsf/hotwater/plug_"):
+    """Swap the Tuya hot-water node for the Shelly adapter tab (node-red/shelly-hot-water.flow.json).
+    The dispatcher + lockout loop already send their plug commands through a link-out; the link-in that
+    fed the Tuya node is removed and the adapter's own link-in takes its place on that link-out, so
+    every command reaches the Shelly and nothing reaches a Tuya node with no device."""
+    broker=next((n["id"] for n in flows if n.get("type")=="mqtt-broker"), None)
+    if not broker: raise RuntimeError("flow has no mqtt-broker node for the Shelly adapter")
+    tab=_shelly_tab(load, broker, out=out)
     tuya_ids={n["id"] for n in flows if n.get("type")=="tuya-smart-device" and n.get("id")=="hot-water-tuya"}
     feeders=[n for n in flows if n.get("type")=="link in" and any(w in tuya_ids for ws in n.get("wires",[]) for w in ws)]
     if not tuya_ids or not feeders: raise RuntimeError("could not find the Tuya hot-water node and the link-in feeding it")
@@ -298,8 +347,12 @@ def build_flow(cfg):
     for tok,val in tm.items(): raw=raw.replace(tok, str(val))
     leftover=sorted(set(re.findall(r"__[A-Z0-9_]+__", raw)))
     flows=json.loads(raw)                                  # validates JSON post-substitution
-    hw=_loads_by_role(cfg).get("hot_water")
-    if hw and _driver(hw)=="shelly":
+    hw=_loads_by_role(cfg).get("hot_water"); hw2=_loads_by_role(cfg).get("hot_water_2")
+    if hw2 and _driver(hw2)=="shelly":
+        flows,dropped=hot_water_2_transform(flows, cfg); c2=_hw2_cfg(cfg)
+        ok("Shelly: Booster 1 on '%s', Booster 2 on '%s' (joins Booster 1 when %d W spare or curtailed, SOC >= %d%%, total load <= %d W) (removed %s)"
+           % (_shelly_cfg(hw)["topic_prefix"], _shelly_cfg(hw2)["topic_prefix"], c2["surplus_on_w"], c2["soc_on"], c2["max_total_w"], ", ".join(dropped)))
+    elif hw and _driver(hw)=="shelly":
         flows,dropped=shelly_transform(flows, hw)
         ok("Shelly: hot water switches over MQTT RPC on '%s/rpc' (removed %s)" % (_shelly_cfg(hw)["topic_prefix"], ", ".join(dropped)))
     if _inverter_kind(cfg)=="selectronic":
@@ -414,7 +467,14 @@ def cmd_publisher(cfg, args):
     resolved=dict(cfg); resolved["out_dir"]=data_dir
     cfg_dest=os.path.join(tgt,"config.json"); json.dump(resolved, open(cfg_dest,"w"), indent=2)
     ok(f"Staged publisher + config + dashboard (data dir {data_dir})")
-    py=shutil.which("python3") or sys.executable; sysname=platform.system()
+    # The services run under the SAME Python as this installer (on a Pi: ~/.venv-bsf, which has paho-mqtt).
+    # Picking "python3" off PATH instead once rewrote a Pi's units to the system Python with no paho, and the relay
+    # + Select.live bridge crash-looped until they were reinstalled from the venv.
+    py=sys.executable; sysname=platform.system()
+    if subprocess.run([py,"-c","import paho.mqtt.client"], capture_output=True).returncode!=0:
+        err(f"{py} has no paho-mqtt, so the relay would crash on start. Run deploy.py with the Python that has it "
+            "(on a Pi: ~/.venv-bsf/bin/python3 install/deploy.py publisher), or: {py} -m pip install -r publisher/requirements.txt")
+        return 1
     if sysname=="Darwin":
         plist=os.path.expanduser(f"~/Library/LaunchAgents/{LABEL}.plist")
         if os.path.exists(plist) and not args.force: warn(f"{plist} exists — use --force. Skipping service.")
