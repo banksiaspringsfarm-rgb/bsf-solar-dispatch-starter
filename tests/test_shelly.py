@@ -55,6 +55,12 @@ check("every function body in the built flow passes node --check", bad_js==[] or
 
 check("Pi install: the permanent logs go to a folder the Pi has, not the Cerbo's /data",
       "/data/home/nodered" not in json.dumps(built) and json.dumps(built).count(os.path.join(os.path.expanduser("~"),"bsf-solar-dispatch","archive"))==3)
+dp={n["id"]:n for n in flows if n.get("z")=="data.tab"}
+fed={w for n in dp.values() for ws in n.get("wires",[]) for w in ws}
+check("Data Persistence is wired: every log handler reaches its file, every /api/bsf endpoint reaches a response",
+      all(dp[i]["type"] in ("file","http response","mqtt out","function") for i in fed if i in dp)
+      and all(n["id"] in fed for n in dp.values() if n["type"] in ("file","http response"))
+      and all(any(n.get("wires") and n["wires"][0]) for n in dp.values() if n["type"]=="http in"))
 vic=cfg_with(dict(HW, driver="tuya", device_id="bf1"))
 check("Cerbo install: logs stay in /data/home/nodered/bsf-archive", json.dumps(deploy.build_flow(vic)[1]).count("/data/home/nodered/bsf-archive/")==3)
 ad=cfg_with(HW); ad["hardware"]["archive_dir"]="/srv/solar-logs/"
