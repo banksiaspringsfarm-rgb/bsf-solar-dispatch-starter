@@ -71,7 +71,11 @@ From the photos, **state what you see and what it means**, e.g.:
 - "Hot water is a 1 kW heat pump on a 10 A plug → a Tuya outdoor smart plug goes in between,
   no electrician. Minimum-off timer must be ≥15 min (compressor)."
 - "3.6 kW element, hardwired → over a plug's 10 A; needs an electrician to fit a Tuya DIN-rail
-  contactor (≥25 A). Wi-Fi must reach the switchboard."
+  contactor (≥25 A), or a 25 A Shelly / Powered-by-Shelly relay (e.g. Ogemray SW40) in an enclosure.
+  Wi-Fi must reach the switchboard."
+- "Shelly / Powered-by-Shelly relay on the hot water → supported with `driver: "shelly"` over the site's
+  own MQTT, no Tuya account. Gen2+ firmware only (Gen1 Shelly 1/1PM is not). Follow
+  `install/shelly-setup.md`."
 - "Battery label says LiFePO4 → SOC bands 20/40, not the lead-acid defaults."
 - "Selectronic SP PRO + a Select.live box → supported: the dispatcher runs in Node-RED on a
   Raspberry Pi instead of a Cerbo. Set `hardware.inverter.kind = "selectronic"`, provision the Pi
@@ -131,6 +135,8 @@ Collect, in this order:
    extra switched loads), `label`, `rated_w` (nameplate watts), `essential` (true = not
    discretionary), `metered` (show live watts). Leave `device_id`/`local_key`/`local_ip`
    blank for now — Steps 2–3 fill them. **Delete the example loads they don't have.**
+   A hot water on a **Shelly** relay instead gets `driver: "shelly"` + `shelly.topic_prefix` and no
+   Tuya fields (`install/shelly-setup.md`). If no load is Tuya, skip Steps 2–3 entirely.
 8. **Dispatcher thresholds** — walk these with their defaults, explaining each from the
    `_comment`s and **sizing to their system**: `surplus_on_w`/`surplus_off_w` (scale to array
    size), `curtail_fronius_w`, `load_cap_w`/`safety_cap_w` (⚠ set to THEIR circuit/wiring

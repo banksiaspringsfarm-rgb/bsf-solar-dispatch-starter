@@ -51,6 +51,12 @@ _DISP  = _CFG.get("dispatcher", {}) if isinstance(_CFG.get("dispatcher"), dict) 
 _LOADS = {l.get("role"): l for l in (_CFG.get("loads") or []) if isinstance(l, dict)}
 def _load_dev(role):  # device_id for a given plug role ("" if absent)
     return (_LOADS.get(role) or {}).get("device_id", "") or ""
+def _load_driver(role):  # "tuya" (default) or "shelly"
+    return ((_LOADS.get(role) or {}).get("driver") or "tuya").strip().lower()
+def _load_connected(role):  # something can actually switch it: a Tuya device id, or a Shelly topic prefix
+    if _load_driver(role) == "shelly":
+        return bool(((_LOADS.get(role) or {}).get("shelly") or {}).get("topic_prefix"))
+    return bool(_load_dev(role))
 
 _INVERTER_KIND = ((_HW.get("inverter") or {}).get("kind") or "victron").strip().lower()
 _SEL = _HW.get("selectronic") if isinstance(_HW.get("selectronic"), dict) else {}
@@ -155,8 +161,8 @@ HW_NOMINAL_W    = int(_DISP.get("hw_element_w", 1614) or 1614)  # element draw w
 # WOULD switch, but nothing can happen. "Commanded on + no meter => assume the element is drawing" is a sound
 # inference only when a device exists. Without one it invents watts and kWh, and the invented watts are then
 # subtracted from the real house load. So: no device => no estimate, no energy, no subtraction.
-HW_CONNECTED    = bool(_load_dev("hot_water"))
-AC_CONNECTED    = bool(_load_dev("air_con"))
+HW_CONNECTED    = _load_connected("hot_water")
+AC_CONNECTED    = _load_connected("air_con")
 
 weekly = {}          # "YYYY-MM-DD"(local) -> bucket of accumulators
 _accum = {"ts": 0}   # last integration wall-clock (ms); reset to 0 on restart
@@ -653,10 +659,9 @@ TUYA_CID    = _TUYA.get("access_id", "YOUR_TUYA_ACCESS_ID")
 TUYA_SECRET = _TUYA.get("access_secret", "YOUR_TUYA_ACCESS_SECRET")
 TUYA_HOST   = _TUYA.get("api_host", "https://openapi.tuyaus.com")  # neutral default; set your region in config.json
 TUYA_EMPTY_SHA = hashlib.sha256(b"").hexdigest()
-PLUGS = {            # category -> Tuya deviceId (cur_power unit W, scale 1 -> /10)
-    "hw": _load_dev("hot_water"),     # metered hot-water element (from loads[] role)
-    "ac": _load_dev("air_con"),       # metered air-conditioner (from loads[] role)
-}
+PLUGS = {cat: _load_dev(role)     # category -> Tuya deviceId (cur_power unit W, scale 1 -> /10)
+         for cat, role in (("hw", "hot_water"), ("ac", "air_con"))   # metered hot water / air-con (loads[] role)
+         if _load_driver(role) != "shelly"}                           # a Shelly reports over MQTT instead
 PLUG_ALIVE_MS  = 10 * 60 * 1000   # cur_voltage heartbeat older than this => plug telemetry dead
 MISMATCH_TOL_W = 200              # essential_other below -this => attribution_mismatch flag
 _tuya = {"token": None, "token_exp": 0}
@@ -700,6 +705,8 @@ def poll_plugs():
       metered  False => plug telemetry is dead; caller MUST NOT subtract it.
     """
     out = {}
+    if not any(PLUGS.values()):
+        return out                   # no Tuya plug to read: don't call the cloud at all
     try:
         tok = _tuya_token()
     except Exception:
@@ -735,6 +742,32 @@ def poll_plugs():
         except Exception:
             out[cat] = {"w": None, "state": "stale", "on": False, "age_s": None, "metered": False}
     return out
+
+
+# ---- Shelly hot water (local MQTT, READ-ONLY) ----------------------------------
+# A Shelly-driven hot water reports through the flow's adapter on the same topics the Tuya bridge used.
+# Its state is re-read every 30 s (GetStatus), so a reading older than SHELLY_FRESH_MS means the relay,
+# its Wi-Fi or the adapter has gone quiet: shown as stale, never as live.
+SHELLY_HW       = _load_driver("hot_water") == "shelly"
+SHELLY_METERED  = bool((_LOADS.get("hot_water") or {}).get("metered", True))
+SHELLY_FRESH_MS = 120 * 1000
+SHELLY_TOPICS   = ("bsf/hotwater/plug_state", "bsf/hotwater/plug_power")
+_shelly = {"on": None, "on_ts": 0, "w": None, "w_ts": 0}
+
+
+def shelly_plugs(t):
+    """{"hw": {...}} in poll_plugs' shape, from the last Shelly readings; {} when hot water is not a Shelly."""
+    if not SHELLY_HW:
+        return {}
+    on, on_ts, w = _shelly["on"], _shelly["on_ts"], _shelly["w"]
+    age_s = round((t - on_ts) / 1000.0, 1) if on_ts else None
+    if on is None or (t - on_ts) > SHELLY_FRESH_MS:
+        return {"hw": {"w": None, "state": "stale", "on": bool(on), "age_s": age_s, "metered": False}}
+    if not on:   # relay open => no draw possible
+        return {"hw": {"w": 0, "state": "off", "on": False, "age_s": age_s, "metered": True}}
+    # ON: the adapter reports the element rating when the relay has no meter, so only a metered relay's watts are "live".
+    live = SHELLY_METERED and w is not None and (t - _shelly["w_ts"]) <= SHELLY_FRESH_MS
+    return {"hw": {"w": w if live else None, "state": "on", "on": True, "age_s": age_s, "metered": live}}
 
 
 def attribute_loads(hw, ac, plugs):
@@ -842,6 +875,9 @@ def on_connect(client, userdata, flags, rc):
         client.subscribe(t, q)
     for t in _NATIVE_MAP:            # native Victron per-charger topics (Phase 3)
         client.subscribe(t, 0)
+    if SHELLY_HW:
+        for t in SHELLY_TOPICS:
+            client.subscribe(t, 0)
     send_keepalive()                # kick the N/ tree so per-charger data starts flowing
     print(f"[publisher] connected rc={rc}, subscribed {len(TOPICS)}+{len(_NATIVE_MAP)} topics", flush=True)
 
@@ -877,6 +913,13 @@ def on_message(client, userdata, msg):
     topic = msg.topic
     if topic in _NATIVE_MAP:        # native Victron per-charger reading (Phase 3)
         update_charger(topic, payload)
+        return
+    if topic in SHELLY_TOPICS:
+        with lock:
+            if topic.endswith("plug_state") and isinstance(payload, bool):
+                _shelly["on"], _shelly["on_ts"] = payload, t
+            elif topic.endswith("plug_power") and _wnum(payload) is not None:
+                _shelly["w"], _shelly["w_ts"] = _wnum(payload), t
         return
     # HW status: align the pv split to this tick BEFORE taking the lock (network I/O).
     hw_picked = _inject_pv_split(pick(payload, HW_FIELDS), t) if topic == "bsf/hotwater/status" else None
@@ -929,6 +972,7 @@ def writer_loop():
         chargers = build_chargers(t)               # per-charger watts — outside the lock
         with lock:
             hw, ac = state["hw"], state["ac"]
+            plugs.update(shelly_plugs(t))
             loads = attribute_loads(hw, ac, plugs)
             # NB: pv_dc / pv_fronius are injected into state["hw"] in on_message at
             # status-arrival time (so they share the same dispatcher tick as pv_total) —

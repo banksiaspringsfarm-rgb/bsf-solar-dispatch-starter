@@ -157,6 +157,18 @@ The iOS home-screen widget runs in the free **Scriptable** app. Common issues:
 
 Full setup is in **`widget/ios/README.md`**.
 
+### Shelly hot water never switches / shows "not connected"
+
+- `deploy.py check` must list `hot_water = Shelly over MQTT`. If it shows a blocker about `topic_prefix`, set
+  `loads[hot_water].shelly.topic_prefix` to the relay's MQTT prefix exactly (it is case-sensitive).
+- Is the relay on the broker? On the Pi: `mosquitto_sub -t '<prefix>/#' -v`. Nothing within a minute means the
+  relay's MQTT is off, points at the wrong server, or the relay is off the Wi-Fi. Fix it in the relay's
+  settings → MQTT (server `<Pi IP>:1883`).
+- Node-RED tab **Shelly — Hot Water**: the *to Shelly RPC* dot shows the last command sent. A red *RPC error* on
+  the status node means the relay rejected it: usually a wrong `switch_id`, or Gen1 firmware (not supported).
+- It turns off by itself after exactly `deadman_s` seconds while it should be on: the 30 s refresh is not
+  reaching the relay. Check the Pi→relay Wi-Fi. That is the dead-man doing its job, not a fault in it.
+
 ### Summer cooling (heating ↔ cooling)
 
 Setting **`dispatcher.ac.mode`** to **`"cooling"`** in `config.json` flips the dashboard labels and

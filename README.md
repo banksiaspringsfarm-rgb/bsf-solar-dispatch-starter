@@ -82,6 +82,7 @@ section if you'd rather drive it yourself.
 | **Victron Cerbo GX** (or any Venus OS device) running **Node-RED** | The standard Victron Large image, or Node-RED installed on Venus OS. |
 | **…or a Selectronic SP PRO** with a **Select.live** box on the LAN | Supported since v1.1. The dispatcher then runs in Node-RED on a Raspberry Pi (see [`install/pi-setup.md`](install/pi-setup.md)); a small bridge polls the Select.live local JSON and feeds it in. Curtailment is inferred (no MPPT flag on an SP PRO). |
 | **Tuya / Smart Life smart plugs** | One per load you want to switch (hot-water element, air-con, pump…), already paired in a Smart Life / Tuya Smart app account. |
+| **…or a Shelly relay for the hot water** | Any Gen2+ Shelly or "Powered by Shelly" relay (e.g. Ogemray 25A for a 3.6 kW element), switched over the site's own MQTT, with no cloud account. It has a dead-man timer: if the controller dies, the relay turns itself off. See [`install/shelly-setup.md`](install/shelly-setup.md). |
 | **A computer on the same LAN as the Cerbo** | Runs the read-only dashboard relay. macOS or Linux, Python 3.8+. A Raspberry Pi is ideal. |
 | **Any phone** | The dashboard is a web page — iPhone or Android. "Add to Home Screen" makes it a full-screen app. Optional native home-screen widgets for both (Android APK; iOS via the free **Scriptable** app). |
 | **Claude Code or Cowork** | To run the guided install. |
@@ -103,7 +104,7 @@ answers the questions that matter. Nothing is hard-coded to one farm.
 | [`publisher/selectlive_bridge.py`](publisher/selectlive_bridge.py) | Selectronic only: polls the Select.live local JSON and republishes SOC / PV / load / battery W on MQTT for the dispatcher. |
 | [`install/pi-setup.md`](install/pi-setup.md) | Turning a Raspberry Pi into the whole controller (Node-RED + broker + relay + Tailscale) — needed for Selectronic, optional for Victron. |
 | [`widget/android/`](widget/android/) · [`widget/ios/`](widget/ios/) | Optional home-screen widgets — iPhone via the free Scriptable app; the Android app is being rebuilt (see `widget/android/README.md`). |
-| [`install/`](install/) | `deploy.py` installer + Tuya setup walkthrough, region→data-center map, troubleshooting. |
+| [`install/`](install/) | `deploy.py` installer + Tuya setup walkthrough, Shelly setup, region→data-center map, troubleshooting. |
 | [`config.example.json`](config.example.json) | The one system-config file. The wizard fills a copy (`config.json`). |
 | [`CLAUDE.md`](CLAUDE.md) | The install runbook Claude Code reads to set this up for you. |
 
@@ -155,7 +156,7 @@ dashboard for a few days first.
 ## What this *won't* do
 
 - ❌ Won't run on inverters other than Victron (Cerbo / Venus OS) or Selectronic SP PRO (Select.live). No SMA, Fronius-only, Sungrow… yet.
-- ❌ Won't control non-Tuya plugs (no Shelly, Zigbee, or Z-Wave out of the box).
+- ❌ Won't control Zigbee or Z-Wave devices. Shelly is supported for the hot water only (air-con and pumps are still Tuya).
 - ❌ Won't do true *cooling* dispatch as-shipped — it ships heating-direction; reversing it is a documented manual step.
 - ❌ Won't sign in to Tuya or create accounts for you — those sign-ups are yours to do.
 - ❌ Won't work without Node-RED (on the Cerbo, or on the Pi for a Selectronic install), or without a LAN host for the relay.

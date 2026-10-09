@@ -18,6 +18,7 @@ HERE     = os.path.dirname(os.path.abspath(__file__))
 ROOT     = os.path.dirname(HERE)
 CFG_PATH = os.path.join(ROOT, "config.json")
 SRC_FLOW = os.path.join(ROOT, "node-red", "bsf-solar-dispatch.flow.json")
+SHELLY_HW_TAB = os.path.join(ROOT, "node-red", "shelly-hot-water.flow.json")
 SRC_PUB  = os.path.join(ROOT, "publisher", "solar_state_publisher.py")
 DASH_DIR = os.path.join(ROOT, "dashboard")
 APK      = os.path.join(ROOT, "widget", "android", "BSF-Solar-Dispatch-v3.apk")
@@ -63,6 +64,16 @@ def _num(v, d): return v if isinstance(v,(int,float)) and not isinstance(v,bool)
 def _strip_scheme(h): return (h or "").replace("https://","").replace("http://","").rstrip("/")
 def _loads_by_role(cfg):
     return {l.get("role"): l for l in (cfg.get("loads") or []) if isinstance(l, dict)}
+def _driver(load): return ((load or {}).get("driver") or "tuya").strip().lower()
+def _shelly_cfg(load):
+    s=(load or {}).get("shelly") or {}
+    return {"topic_prefix": (s.get("topic_prefix") or "").strip(), "switch_id": s.get("switch_id", 0),
+            "deadman_s": s.get("deadman_s", 300)}
+def _connected(load):
+    """A load something can actually switch: a Tuya device id, or a Shelly topic prefix."""
+    if not load: return False
+    return bool(_shelly_cfg(load)["topic_prefix"]) if _driver(load)=="shelly" else bool(load.get("device_id"))
+SHELLY_PREFIX_RE = re.compile(r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*$")   # an MQTT topic prefix, no wildcards
 
 def _ssl_unverified():
     c = ssl.create_default_context(); c.check_hostname=False; c.verify_mode=ssl.CERT_NONE; return c
@@ -150,6 +161,21 @@ def validate(cfg):
     elif _num(ac.get("inside_temp_on_c"),19)>=_num(ac.get("inside_temp_off_c"),22):
         issues.append("heating mode: dispatcher.ac.inside_temp_on_c must be < inside_temp_off_c.")
     if not (cfg.get("loads") or []): warns.append("no loads defined — nothing to dispatch (publisher/dashboard still run).")
+    for l in (cfg.get("loads") or []):
+        if not isinstance(l, dict): continue
+        role=l.get("role"); drv=_driver(l)
+        if drv not in ("tuya","shelly"): issues.append(f"loads[{role}].driver '{drv}' — must be 'tuya' or 'shelly'.")
+        if drv!="shelly": continue
+        if role!="hot_water": issues.append(f"loads[{role}].driver='shelly': only the hot_water load can use a Shelly today.")
+        sc=_shelly_cfg(l)
+        if not SHELLY_PREFIX_RE.match(sc["topic_prefix"]):
+            issues.append(f"loads[{role}].shelly.topic_prefix '{sc['topic_prefix']}' — set it to the Shelly's MQTT topic prefix (letters, digits, - _ /; no + or #).")
+        if not (isinstance(sc["switch_id"],int) and not isinstance(sc["switch_id"],bool) and 0<=sc["switch_id"]<=3):
+            issues.append(f"loads[{role}].shelly.switch_id must be 0-3 (0 on a single relay).")
+        if not (isinstance(sc["deadman_s"],(int,float)) and not isinstance(sc["deadman_s"],bool) and 120<=sc["deadman_s"]<=3600):
+            issues.append(f"loads[{role}].shelly.deadman_s must be 120-3600 s (it is refreshed every 30 s while ON).")
+        if not _num(l.get("rated_w"),0)>0:
+            issues.append(f"loads[{role}].rated_w must be the element's watts — it stands in for the meter while the relay is ON.")
     kind=_inverter_kind(cfg)
     if kind not in ("victron","selectronic"): issues.append(f"hardware.inverter.kind '{kind}' — must be 'victron' or 'selectronic'.")
     if kind=="selectronic":
@@ -172,6 +198,9 @@ def cmd_check(cfg, args):
         (warn if (not cerbo or cerbo.endswith(".50")) else ok)(f"cerbo_ip = {cerbo or '(unset)'}")
     dpct,wpct,chem=soc_bands(cfg); ok(f"battery = {chem} (SOC red <= {dpct}%, amber < {wpct}%)")
     nplugs=len(cfg.get("loads") or []); ok(f"{nplugs} load(s) configured")
+    for l in (cfg.get("loads") or []):
+        if isinstance(l,dict) and _driver(l)=="shelly":
+            ok(f"{l.get('role')} = Shelly over MQTT, prefix '{_shelly_cfg(l)['topic_prefix']}' (point the relay's MQTT at this site's broker)")
     if _g(cfg,"tuya.access_id","").startswith("YOUR_"): warn("Tuya access_id not set (Tuya features idle).")
     for w_ in warns: warn(w_)
     for i in issues: err(i)
@@ -231,12 +260,48 @@ def selectronic_transform(flows, prefix="sel"):
         else: out.append(n)
     return out, swapped
 
+def shelly_transform(flows, load):
+    """Swap the Tuya hot-water node for the Shelly adapter tab (node-red/shelly-hot-water.flow.json).
+    The dispatcher + lockout loop already send their plug commands through a link-out; the link-in that
+    fed the Tuya node is removed and the adapter's own link-in takes its place on that link-out, so
+    every command reaches the Shelly and nothing reaches a Tuya node with no device."""
+    broker=next((n["id"] for n in flows if n.get("type")=="mqtt-broker"), None)
+    if not broker: raise RuntimeError("flow has no mqtt-broker node for the Shelly adapter")
+    sc=_shelly_cfg(load)
+    if not SHELLY_PREFIX_RE.match(sc["topic_prefix"]):
+        raise RuntimeError("loads[hot_water].shelly.topic_prefix is not set (run `deploy.py check`)")
+    tm={"__SHELLY_PREFIX__":sc["topic_prefix"], "__SHELLY_SWITCH_ID__":str(int(sc["switch_id"])),
+        "__SHELLY_SRC__":"bsf-dispatch-"+sc["topic_prefix"].replace("/","-"),
+        "__SHELLY_DEADMAN_S__":str(int(sc["deadman_s"])),
+        "__SHELLY_METERED__":"true" if load.get("metered", True) else "false",
+        "__SHELLY_RATED_W__":str(int(_num(load.get("rated_w"),0))), "__SHELLY_BROKER__":broker}
+    raw=open(SHELLY_HW_TAB).read()
+    for k,v in tm.items(): raw=raw.replace(k,v)
+    tab=json.loads(raw)
+    tuya_ids={n["id"] for n in flows if n.get("type")=="tuya-smart-device" and n.get("id")=="hot-water-tuya"}
+    feeders=[n for n in flows if n.get("type")=="link in" and any(w in tuya_ids for ws in n.get("wires",[]) for w in ws)]
+    if not tuya_ids or not feeders: raise RuntimeError("could not find the Tuya hot-water node and the link-in feeding it")
+    drop=tuya_ids|{n["id"] for n in feeders}
+    sources={src for n in feeders for src in n.get("links",[])}
+    linkin=next(n for n in tab if n["id"]=="shelly.hw.linkin"); linkin["links"]=sorted(sources)
+    out=[]
+    for n in flows:
+        if n["id"] in drop: continue
+        if n["id"] in sources:
+            n=dict(n); n["links"]=[l for l in n.get("links",[]) if l not in drop]+["shelly.hw.linkin"]
+        out.append(n)
+    return out+tab, sorted(drop)
+
 def build_flow(cfg):
     raw=open(SRC_FLOW).read()
     tm=token_map(cfg)
     for tok,val in tm.items(): raw=raw.replace(tok, str(val))
     leftover=sorted(set(re.findall(r"__[A-Z0-9_]+__", raw)))
     flows=json.loads(raw)                                  # validates JSON post-substitution
+    hw=_loads_by_role(cfg).get("hot_water")
+    if hw and _driver(hw)=="shelly":
+        flows,dropped=shelly_transform(flows, hw)
+        ok("Shelly: hot water switches over MQTT RPC on '%s/rpc' (removed %s)" % (_shelly_cfg(hw)["topic_prefix"], ", ".join(dropped)))
     if _inverter_kind(cfg)=="selectronic":
         flows,swapped=selectronic_transform(flows, _g(cfg,"hardware.selectronic.topic_prefix") or "sel")
         ok("Selectronic: swapped %d Victron input nodes for MQTT inputs (%s)" % (len(swapped), ", ".join(t for _,t in swapped[:6])+("…" if len(swapped)>6 else "")))
@@ -314,7 +379,7 @@ def cmd_dashboard(cfg, args):
       "build": _git_build(),
       # What THIS site actually has, so the page stops describing the author's farm (see the site-shape block in the dashboard):
       "acSolarName": (_g(cfg,"hardware.fronius.label","") or ("AC solar" if _inverter_kind(cfg)=="selectronic" else "Fronius")),
-      "hwConnected": bool((_loads_by_role(cfg).get("hot_water") or {}).get("device_id")),
+      "hwConnected": _connected(_loads_by_role(cfg).get("hot_water")),
       "hasAirCon": "air_con" in _loads_by_role(cfg),
       "sourceName": "system" if _inverter_kind(cfg)=="selectronic" else "Cerbo",
       "showBattery": bool(_g(cfg,"dashboard.show_battery_card",False)), "showDiag": bool(_g(cfg,"dashboard.show_connectivity_card",False)),
