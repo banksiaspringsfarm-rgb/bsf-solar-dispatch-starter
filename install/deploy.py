@@ -341,10 +341,21 @@ def shelly_transform(flows, load, out="bsf/hotwater/plug_"):
         out.append(n)
     return out+tab, sorted(drop)
 
+CERBO_ARCHIVE="/data/home/nodered/bsf-archive"
+def archive_dir(cfg):
+    """Where Node-RED appends the permanent event + daily logs (events-YYYY-MM-DD.jsonl, daily-…, state-latest.json).
+    The flow ships with the Cerbo's /data path; a Pi has no /data and Node-RED can't create it, so every write there
+    failed silently. Default on a Selectronic/Pi install: ~/bsf-solar-dispatch/archive of the user running deploy.py
+    (Node-RED runs as that same user on the Pi)."""
+    d=(_g(cfg,"hardware.archive_dir") or "").strip().rstrip("/")
+    if d: return os.path.expanduser(d)
+    return os.path.join(os.path.expanduser("~"),"bsf-solar-dispatch","archive") if _inverter_kind(cfg)=="selectronic" else CERBO_ARCHIVE
+
 def build_flow(cfg):
     raw=open(SRC_FLOW).read()
     tm=token_map(cfg)
     for tok,val in tm.items(): raw=raw.replace(tok, str(val))
+    raw=raw.replace(CERBO_ARCHIVE, archive_dir(cfg))
     leftover=sorted(set(re.findall(r"__[A-Z0-9_]+__", raw)))
     flows=json.loads(raw)                                  # validates JSON post-substitution
     hw=_loads_by_role(cfg).get("hot_water"); hw2=_loads_by_role(cfg).get("hot_water_2")

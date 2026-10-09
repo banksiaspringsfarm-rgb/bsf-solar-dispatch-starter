@@ -64,6 +64,8 @@
     "_chargers": "ONE entry per solar tracker, any count (2/4/6…). kind='solarcharger' for a BlueSolar/SmartSolar MPPT (uses N/<portal>/solarcharger/<instance>/Yield/Power); kind='multi' for a Multi RS PV tracker (uses N/<portal>/multi/<instance>/Pv/<tracker>/P). 'instance' is the VE device instance; 'key' is a short unique id used on the dashboard's per-charger drill-down; 'kw' optional rated size. Find your instances in VRM/Node-RED (victron-input-solarcharger service list).",
     "_inverter_kind": "'victron' (Cerbo GX / Venus OS -- what ships) or 'selectronic' (SP PRO via a Select.live box on the LAN). selectronic swaps the flow's Victron input nodes for MQTT ones fed by publisher/selectlive_bridge.py, and points deploy at a local Node-RED (hardware.nodered_url) instead of the Cerbo.",
     "nodered_url": "",
+    "archive_dir": "",
+    "_archive_dir": "Where Node-RED keeps the permanent logs: every dispatcher on/off event with its reason (events-YYYY-MM-DD.jsonl) and the daily summaries (daily-…jsonl). Blank = /data/home/nodered/bsf-archive on a Cerbo, ~/bsf-solar-dispatch/archive on a Pi (Selectronic).",
     "_nodered_url": "Where deploy.py POSTs the flow. Blank = https://<cerbo_ip>:1881 (Cerbo). On a Pi/Selectronic install: http://127.0.0.1:1880",
     "selectronic": {
       "ip": "",
