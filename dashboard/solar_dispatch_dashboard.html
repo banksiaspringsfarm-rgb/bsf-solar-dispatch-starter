@@ -522,8 +522,10 @@
       sum.className='frz-sum'+((warm||stale)?' bad':'');
       sum.textContent=bits.length?bits.join(' · '):(names.length+' freezer'+(names.length>1?'s':'')+', all cold');
     }
+    // Own fetch, not the page's fetchFirst(): this card sits ABOVE the script that defines it.
+    function get(urls){ return urls.reduce(function(p,u){ return p.catch(function(){ return fetch(u,{cache:'no-store'}).then(function(r){ if(!r.ok) throw 0; return r.json(); }); }); }, Promise.reject()); }
     function poll(){
-      fetchFirst(['/solar/state','state.json']).then(function(s){ paint(s&&s.freezers); }).catch(function(){});
+      get(['state.json','/solar/state']).then(function(s){ paint(s&&s.freezers); }).catch(function(){});
     }
     poll(); setInterval(poll, 30000);
     document.addEventListener('visibilitychange',function(){ if(!document.hidden) poll(); });
