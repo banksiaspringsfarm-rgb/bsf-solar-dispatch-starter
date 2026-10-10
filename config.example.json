@@ -158,6 +158,7 @@
     "sustain_on_ms": 60000,
     "sustain_off_ms": 60000,
     "sustain_off_ms_curt": 180000,
+    "dispatch_end_offset_min": 120,
     "soc_windows": {
       "w1": {
         "on": 80,
@@ -183,6 +184,7 @@
     "_caps": "load_cap_w = the most a switched load may add on top of house load (e.g. a circuit/trailer limit). safety_cap_w = hard cascade-trip ceiling (must be ≥ load_cap_w). VERY install-specific — set to YOUR wiring limits.",
     "_hw_element_w": "Rated draw of your hot-water element (W) — also the metering fallback. Match your element.",
     "_sustain": "Anti-flap dwell times (ms): a load must see the condition hold this long before it switches. *_curt variants apply while curtailed.",
+    "_dispatch_end_offset_min": "Hot water stops being switched on this many minutes before sunset (default 120). Lower it (e.g. 60) to catch late-afternoon throttled solar, typical on a big lithium bank.",
     "_soc_windows": "Time-of-day battery SOC gates (on/off %, ON>OFF). W1 (early), W2 (midday), W3 (afternoon) progressively demand a fuller battery before dispatching, so loads run on genuine surplus. Defaults suit lead-acid (keep SOC high). For lithium you can lower these to cycle more.",
     "_ac": "mode: 'heating' (fire when cold, ON<OFF — what ships) or 'cooling' (fire when hot, ON>OFF). NOTE: choosing 'cooling' flips the dashboard labels + setpoint sense, but the dispatcher's temperature COMPARISON ships in heating mode — true cooling-direction dispatch is a documented manual step (see install/troubleshooting.md → 'Summer cooling'), deliberately not auto-applied to the safety logic. inside_temp_on_c/off_c are the heating setpoints (also tunable live from the dashboard). inside_temp_source: tuya_plug | external | disabled."
   },
