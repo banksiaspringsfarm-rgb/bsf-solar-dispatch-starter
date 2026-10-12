@@ -49,4 +49,19 @@ other={"key":"site-a","name":"Site A","state_url":"http://d:8780/state.json"}
 newer=dict(raw, received_ts=raw["received_ts"]+5000, text="newer")
 check("same note id at another site is a different note; newest first", fleet.merge_inbox(inbox,other,{"notes":[newer]})==1 and inbox[0]["site"]=="Site A" and len(inbox)==2)
 check("garbage payload tolerated", fleet.merge_inbox(inbox,st,None)==0 and fleet.merge_inbox(inbox,st,{"notes":"x"})==0)
+# --- aircon (AC v2 + Faikout) and freezers for the 3-site widget ---
+ac2snap=dict(snap, ac2={"faikout":{"home":24.5,"power":True,"mode":"F","temp":22.0},"faikout_age_s":4.0,"faikout_up":True,"tuya_inside_c":28.6,"ac_w":23})
+a=fleet.summarise(site,ac2snap,now)["aircon"]
+check("aircon line from ac2", a=={"fresh":True,"room":24.5,"probe":False,"on":True,"mode":"F","set":22.0,"ac_w":23.0})
+quiet=dict(snap, ac2={"faikout":{"home":24.5,"power":True},"faikout_age_s":None,"faikout_up":False,"tuya_inside_c":28.6})
+q=fleet.summarise(site,quiet,now)["aircon"]
+check("Faikout quiet => Tuya probe, marked, no stale mode", q["fresh"] is False and q["room"]==28.6 and q["probe"] is True and q["on"] is None)
+check("no ac2 / no freezers => None", fleet.summarise(site,snap,now)["aircon"] is None and fleet.summarise(site,snap,now)["freezers"] is None)
+frsnap=dict(snap, freezers={"b":{"temp_c":-18.6,"ts":9,"battery":31,"mac":"secret"},"a":{"temp_c":-22.6,"ts":9,"battery":90}})
+fr=fleet.summarise(site,frsnap,now)["freezers"]
+check("freezers sorted + whitelisted", [f["name"] for f in fr]==["a","b"] and "secret" not in json.dumps(fr))
+check("offline card carries aircon/freezers as None", fleet.offline(site,"x")["aircon"] is None and fleet.offline(site,"x")["freezers"] is None)
+deadfr=dict(frsnap, hw=dict(snap["hw"], stale=["soc","ac_load"]))
+check("dead inverter still shows freezers (they don't depend on it)", [f["name"] for f in fleet.summarise(site,deadfr,now)["freezers"]]==["a","b"])
 print("\n%d failure(s)"%fails); sys.exit(1 if fails else 0)
+

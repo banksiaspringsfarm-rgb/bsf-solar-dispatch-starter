@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solar · 3 sites</title>
+<!-- Desktop twin of the Android "Solar · 3 sites" widget. Reads fleet.json (written by fleet_relay.py
+     next to this file) every 15 s. Click a site to open its dashboard. Same ring colours and wording
+     as the phone (SolarWidget.java): red at <= 60 % (lead-acid), green charging, orange draining,
+     gold resting/full; a stale or offline site gets the grey track and dimmed numbers. -->
+<style>
+  :root{--bg:#0d1117;--card:#161b22;--line:#30363d;--ink:#eceff4;--mut:#9aa3b2;--dim:#6b7484;
+        --red:#f87171;--amber:#f5b62e;--green:#34d399;--cyan:#38bdf8;--track:rgba(148,156,168,.4);
+        --r-green:#22c55e;--r-orange:#fb923c;--r-gold:#f5b62e;--r-red:#ef4444}
+  @media (prefers-color-scheme: light){
+    :root{--bg:#eef1f5;--card:#fafafa;--line:#dde1e7;--ink:#1a1a1a;--mut:#7a828e;--dim:#9aa1ac;
+          --red:#dc2626;--amber:#c77d12;--green:#1a9c5b;--cyan:#0e7c99;--r-green:#16a34a;--r-orange:#f08a3c}
+  }
+  *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.3 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:22px;margin:10px;padding:6px 16px 12px}
+  .site{display:flex;gap:16px;align-items:center;padding:14px 4px;border-bottom:1px solid var(--line);cursor:pointer;
+        text-decoration:none;color:inherit}
+  .site:hover .name{color:var(--cyan)} .site:last-of-type{border-bottom:0}
+  .ring{flex:0 0 76px;height:76px;position:relative}
+  .ring svg{width:76px;height:76px;transform:rotate(-90deg)}
+  .ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:700}
+  .body{flex:1;min-width:0}
+  .name{font-size:19px;font-weight:700}
+  .stat{color:var(--mut);font-size:13.5px;margin-top:1px}
+  .stat.bad{color:var(--red)}
+  .nums{display:flex;gap:16px;align-items:center;margin-top:5px;font-weight:700;font-size:16.5px;font-variant-numeric:tabular-nums}
+  .nums .hw{margin-left:auto;font-size:14.5px}
+  .extra{margin-top:4px;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
+  .dim{color:var(--dim)!important}
+  .foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding:10px 14px;border:1px solid var(--line);
+        border-radius:14px;color:var(--cyan);font-weight:600;font-size:14px;cursor:pointer;background:transparent;width:100%;font-family:inherit}
+  .foot span{color:var(--mut);font-weight:500;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="sites"></div>
+  <button class="foot" id="refresh" type="button">↻ Refresh <span id="checked">loading…</span></button>
+</div>
+<script>
+var SOC_LOW = 60, DEADBAND = 30, STALE_MS = 5 * 60 * 1000;
+function n(v){ return (typeof v === 'number' && isFinite(v)) ? v : null; }
+function w(v){ v = n(v); return v === null ? '— W' : Math.round(v).toLocaleString('en-AU') + ' W'; }
+function ago(s){ if (s === null || s === undefined) return '—'; var m = Math.floor(s / 60); if (m <= 0) return 'just now';
+  if (m < 60) return m + 'm ago'; if (m < 2880) return Math.floor(m / 60) + 'h ' + (m % 60) + 'm ago'; return Math.floor(m / 1440) + 'd ago'; }
+function socState(soc, b){ if (soc !== null && soc <= SOC_LOW) return 'low'; if (soc !== null && soc >= 100) return 'full';
+  if (b !== null && b > DEADBAND) return 'charging'; if (b !== null && b < -DEADBAND) return 'draining'; return 'float'; }
+function ringColor(soc, b){ if (soc !== null && soc <= SOC_LOW) return 'var(--r-red)'; if (b !== null && b > DEADBAND) return 'var(--r-green)';
+  if (b !== null && b < -DEADBAND) return 'var(--r-orange)'; return 'var(--r-gold)'; }
+function el(tag, cls, txt){ var e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; }
+function span(txt, color, bold){ var s = el('span', null, txt); if (color) s.style.color = color; if (bold) s.style.fontWeight = 700; return s; }
+
+function ring(soc, b, bad){
+  var box = el('div', 'ring'), r = 32, c = 2 * Math.PI * r;
+  var svg = '<svg viewBox="0 0 76 76"><circle cx="38" cy="38" r="' + r + '" fill="none" stroke="var(--track)" stroke-width="7"/>';
+  if (!bad && soc !== null) svg += '<circle cx="38" cy="38" r="' + r + '" fill="none" stroke="' + ringColor(soc, b) + '" stroke-width="7" stroke-linecap="round" stroke-dasharray="' +
+    (Math.max(0, Math.min(100, soc)) / 100 * c).toFixed(1) + ' ' + c.toFixed(1) + '"/>';
+  box.innerHTML = svg + '</svg>';
+  var t = el('b', bad || soc === null ? 'dim' : null, soc === null ? '—%' : Math.round(soc) + '%'); box.appendChild(t);
+  return box;
+}
+
+function airconLine(a, bad){
+  var d = el('div', 'extra'), fresh = !bad && a.fresh;
+  d.appendChild(span('❄ '));
+  d.appendChild(span((a.room === null || a.room === undefined ? '—' : a.room.toFixed(1) + '°') + (a.probe && a.room != null ? ' probe' : ''),
+    (fresh || (a.probe && !bad)) ? 'var(--ink)' : 'var(--dim)'));
+  d.appendChild(span(' · ', 'var(--mut)'));
+  var txt = 'aircon —', col = 'var(--dim)';
+  if (fresh && a.on === false) txt = 'Off';
+  else if (fresh && a.on) {
+    var sp = a.set != null ? ' ' + (a.set % 1 ? a.set : Math.round(a.set)) + '°' : '';
+    ({C:function(){ txt = 'Cool' + sp; col = 'var(--cyan)'; }, H:function(){ txt = 'Heat' + sp; col = 'var(--amber)'; },
+      F:function(){ txt = 'Fan only'; col = 'var(--green)'; }, D:function(){ txt = 'Dry' + sp; col = 'var(--cyan)'; },
+      A:function(){ txt = 'Auto' + sp; col = 'var(--ink)'; }}[a.mode] || function(){ txt = 'On'; col = 'var(--ink)'; })();
+  }
+  d.appendChild(span(txt, col));
+  if (fresh && n(a.ac_w) !== null) d.appendChild(span('  ' + Math.round(a.ac_w) + ' W', 'var(--mut)'));
+  return d;
+}
+
+function freezerLine(fr, bad){
+  var d = el('div', 'extra'), now = Date.now() / 1000, low = 0;
+  d.appendChild(span('🧊'));
+  fr.forEach(function(f){
+    var t = n(f.temp_c), stale = bad || t === null || (f.ts && now - f.ts > 600);
+    if (n(f.battery) !== null && f.battery < 50) low++;
+    d.appendChild(span(' ' + (t === null ? '—' : t.toFixed(1).replace('-', '−') + '°'),
+      stale ? 'var(--dim)' : t > -12 ? 'var(--red)' : t > -15 ? 'var(--amber)' : 'var(--green)'));
+  });
+  if (low) { d.appendChild(el('br')); d.appendChild(span(low === 1 ? '1 probe battery low' : low + ' probe batteries low', bad ? 'var(--dim)' : 'var(--red)')); }
+  return d;
+}
+
+function render(f){
+  var box = document.getElementById('sites'); box.textContent = '';
+  (f.sites || []).forEach(function(s){
+    var soc = n(s.soc), b = n(s.batt_w), age = n(s.age_s);
+    var bad = s.state === 'offline' || (age !== null && age * 1000 > STALE_MS);   // same 5-min rule as the phone
+    var a = el('a', 'site'); a.href = s.dashboard_url || '#'; a.target = '_blank'; a.rel = 'noopener';
+    a.title = 'Open ' + s.name + '’s dashboard';
+    a.appendChild(ring(soc, b, bad));
+    var body = el('div', 'body');
+    body.appendChild(el('div', 'name', s.name));
+    var st;
+    if (s.state === 'offline') st = 'Offline · ' + (/inverter/.test(s.error || '') ? 'inverter not reporting' : (s.error || ago(age)));
+    else if (bad) st = 'Stale · ' + ago(age);
+    else st = ago(age) + ' · ' + socState(soc, b) + (s.curtailed ? ' · throttled' : '');
+    body.appendChild(el('div', 'stat' + (bad ? ' bad' : ''), st));
+    var nums = el('div', 'nums' + (bad ? ' dim' : ''));
+    nums.appendChild(span('☀ ' + w(s.pv_w))); nums.appendChild(span('🔌 ' + w(s.load_w)));
+    var hwOn = !bad && s.hw_state === 'on', hwKnown = !bad && (s.hw_state === 'on' || s.hw_state === 'off');
+    var hw = span('🔥💧 ' + (!hwKnown ? '—' : hwOn ? 'ON' : 'OFF'), hwOn ? 'var(--amber)' : 'var(--dim)'); hw.className = 'hw';
+    nums.appendChild(hw); body.appendChild(nums);
+    if (s.aircon) body.appendChild(airconLine(s.aircon, bad));
+    if (s.freezers && s.freezers.length) body.appendChild(freezerLine(s.freezers, bad));
+    a.appendChild(body); box.appendChild(a);
+  });
+  var d = new Date();
+  document.getElementById('checked').textContent = 'checked ' + d.toLocaleTimeString('en-AU', {hour:'numeric', minute:'2-digit'}).toLowerCase();
+}
+function load(){
+  fetch('fleet.json?_=' + Date.now(), {cache:'no-store'}).then(function(r){ return r.json(); }).then(render)
+    .catch(function(){ document.getElementById('checked').textContent = 'fleet relay not answering'; });
+}
+document.getElementById('refresh').onclick = load;
+// Opened as a Mac app window (Chrome --app, no toolbar): size it like a widget. A normal tab is left alone.
+if (!window.toolbar.visible && window.outerWidth > 600) { try { window.resizeTo(460, 720); } catch (e) {} }
+load(); setInterval(load, 15000);
+</script>
+</body>
+</html>

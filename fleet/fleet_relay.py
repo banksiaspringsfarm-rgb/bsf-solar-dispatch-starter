@@ -30,6 +30,32 @@ def _num(v):
         f = float(v); return f if f == f else None
     except (TypeError, ValueError): return None
 
+def _aircon(snap):
+    """A site whose relay carries an "ac2" block (AC v2 + a Faikout-controlled aircon) -> the widget's
+    aircon line: inside temperature, on/mode/setpoint, fresh. None when the site has no such block."""
+    a = snap.get("ac2")
+    if not isinstance(a, dict): return None
+    f = a.get("faikout") if isinstance(a.get("faikout"), dict) else {}
+    age = _num(a.get("faikout_age_s"))
+    fresh = bool(f) and age is not None and age <= STALE_HARD_S and a.get("faikout_up") is not False
+    room = _num(f.get("home")) if fresh else None
+    probe = False
+    if room is None and _num(a.get("tuya_inside_c")) is not None:
+        room, probe = _num(a.get("tuya_inside_c")), True
+    return {"fresh": fresh, "room": room, "probe": probe,
+            "on": f.get("power") if fresh else None, "mode": f.get("mode") if fresh else None,
+            "set": _num(f.get("temp")) if fresh else None, "ac_w": _num(a.get("ac_w"))}
+
+def _freezers(snap):
+    """state.json "freezers" {name: {ts, temp_c, battery}} -> [{name, temp_c, ts, battery}] sorted by name."""
+    fr = snap.get("freezers")
+    if not isinstance(fr, dict) or not fr: return None
+    out = []
+    for n in sorted(fr):
+        o = fr[n] if isinstance(fr[n], dict) else {}
+        out.append({"name": n, "temp_c": _num(o.get("temp_c")), "ts": _num(o.get("ts")), "battery": _num(o.get("battery"))})
+    return out
+
 def summarise(site, snap, fetched_ms):
     """Whitelist copy of a site snapshot -> fleet card. Pure; unit-tested."""
     hw = snap.get("hw") or {}; ac = snap.get("ac") or {}; loads = snap.get("loads") or {}; today = snap.get("today") or {}
@@ -41,7 +67,9 @@ def summarise(site, snap, fetched_ms):
     dead_inputs = [k for k in (hw.get("stale") or []) if k in ("soc", "pv_dc", "pv_fronius", "ac_load")]
     stale = "ok"
     if dead_inputs:
-        return dict(offline(site, "no live readings from the inverter (%s)" % ", ".join(dead_inputs)), age_s=age_s)
+        # Freezer probes and the aircon do not depend on the inverter: keep showing them (as the phone does).
+        return dict(offline(site, "no live readings from the inverter (%s)" % ", ".join(dead_inputs)), age_s=age_s,
+                    freezers=_freezers(snap), aircon=_aircon(snap))
     if not snap.get("ok") or age_s is None or age_s > STALE_HARD_S or (hw_age is not None and hw_age > STALE_HARD_S): stale = "offline"
     elif age_s > STALE_SOFT_S or (hw_age is not None and hw_age > STALE_SOFT_S): stale = "lagging"
     return {
@@ -58,6 +86,7 @@ def summarise(site, snap, fetched_ms):
         "inside_temp": _num(ac.get("inside_temp")),
         "today_hw_kwh": _num(today.get("hw_kwh")), "today_ac_kwh": _num(today.get("ac_kwh")), "today_hw_h": _num(today.get("hw_h")),
         "source": snap.get("source"),
+        "aircon": _aircon(snap), "freezers": _freezers(snap),
     }
 
 def _friendly(err):
@@ -72,7 +101,8 @@ def offline(site, err):
             "ok": False, "state": "offline", "age_s": None, "error": _friendly(err),
             "soc": None, "pv_w": None, "load_w": None, "batt_w": None, "curtailed": False,
             "hw_state": None, "hw_w": None, "ac_state": None, "ac_mode": None, "inside_temp": None,
-            "today_hw_kwh": None, "today_ac_kwh": None, "today_hw_h": None, "source": None}
+            "today_hw_kwh": None, "today_ac_kwh": None, "today_hw_h": None, "source": None,
+            "aircon": None, "freezers": None}
 
 def fetch(site, timeout):
     now_ms = int(time.time() * 1000)
