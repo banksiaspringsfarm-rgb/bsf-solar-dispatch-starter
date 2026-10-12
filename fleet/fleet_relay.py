@@ -40,8 +40,9 @@ def _aircon(snap):
     fresh = bool(f) and age is not None and age <= STALE_HARD_S and a.get("faikout_up") is not False
     room = _num(f.get("home")) if fresh else None
     probe = False
-    if room is None and _num(a.get("tuya_inside_c")) is not None:
-        room, probe = _num(a.get("tuya_inside_c")), True
+    probe_c = _num(a.get("probe_c")) if _num(a.get("probe_c")) is not None else _num(a.get("tuya_inside_c"))   # corrected when the relay has it
+    if room is None and probe_c is not None:
+        room, probe = probe_c, True
     return {"fresh": fresh, "room": room, "probe": probe,
             "on": f.get("power") if fresh else None, "mode": f.get("mode") if fresh else None,
             "set": _num(f.get("temp")) if fresh else None, "ac_w": _num(a.get("ac_w"))}
