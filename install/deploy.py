@@ -20,6 +20,7 @@ CFG_PATH = os.path.join(ROOT, "config.json")
 SRC_FLOW = os.path.join(ROOT, "node-red", "bsf-solar-dispatch.flow.json")
 SHELLY_HW_TAB = os.path.join(ROOT, "node-red", "shelly-hot-water.flow.json")
 HW2_TAB  = os.path.join(ROOT, "node-red", "hot-water-2.flow.json")
+FROST_TAB = os.path.join(ROOT, "node-red", "frost-forecast.flow.json")
 SRC_PUB  = os.path.join(ROOT, "publisher", "solar_state_publisher.py")
 DASH_DIR = os.path.join(ROOT, "dashboard")
 APK      = os.path.join(ROOT, "widget", "android", "BSF-Solar-Dispatch-v3.apk")
@@ -192,6 +193,22 @@ def validate(cfg):
             issues.append(f"dispatcher.safety_cap_w ({_num(D.get('safety_cap_w'),4200)}) must be > dispatcher.hot_water_2.max_total_w ({c2['max_total_w']}): Booster 2 has to shed before the safety cap trips Booster 1.")
         if c2["max_total_w"] < _num(L["hot_water"].get("rated_w"),0)+c2["rated_w"]:
             warns.append(f"dispatcher.hot_water_2.max_total_w ({c2['max_total_w']} W) is below both boosters together: Booster 2 will rarely if ever run.")
+    G=(D.get("hot_water_guard") or {})
+    for k in ("min_on_ms","min_off_ms"):
+        v=G.get(k)
+        if v is not None and not (isinstance(v,(int,float)) and not isinstance(v,bool) and 0<=v<=6*3600*1000):
+            issues.append(f"dispatcher.hot_water_guard.{k} must be 0-21600000 ms (0 = off).")
+    F=G.get("frost") or {}
+    if F.get("enabled") is True:
+        if not isinstance(F.get("min_c",2),(int,float)) or not -10<=F.get("min_c",2)<=10:
+            issues.append("dispatcher.hot_water_guard.frost.min_c must be a temperature between -10 and 10 C.")
+        dpct2,_,_=soc_bands(cfg)
+        if _num(F.get("soc_floor_pct"),60)<dpct2:
+            issues.append(f"dispatcher.hot_water_guard.frost.soc_floor_pct ({_num(F.get('soc_floor_pct'),60)}) must not be below battery.soc_danger_pct ({dpct2}).")
+        if not (cfg.get("location") or {}).get("lat"):
+            issues.append("frost hold needs location.lat/lon (the forecast is for this site).")
+        if not _loads_by_role(cfg).get("hot_water"):
+            warns.append("frost hold is on but there is no hot_water load to hold on.")
     kind=_inverter_kind(cfg)
     if kind not in ("victron","selectronic"): issues.append(f"hardware.inverter.kind '{kind}' — must be 'victron' or 'selectronic'.")
     if kind=="selectronic":
@@ -292,6 +309,27 @@ def _shelly_tab(load, broker, ids="shelly.hw.", label="Shelly — Hot Water", ou
     raw=raw.replace("shelly.hw.", ids).replace("Shelly — Hot Water", label).replace("bsf/hotwater/plug_", out)
     return json.loads(raw)
 
+# dispatcher.hot_water_guard: minimum run/rest times and a frost-night hold, for a heat-pump hot water.
+# All off by default, which is the original dispatcher exactly.
+HW_GUARD_DEFAULTS = {"min_on_ms": 0, "min_off_ms": 0, "frost": {"enabled": False, "min_c": 2, "soc_floor_pct": 60}}
+def _hw_guard(cfg):
+    G=(cfg.get("dispatcher") or {}).get("hot_water_guard") or {}
+    F=G.get("frost") or {}
+    c={k:int(_num(G.get(k),v)) for k,v in HW_GUARD_DEFAULTS.items() if k!="frost"}
+    c["frost"]={"enabled": F.get("enabled") is True,
+                "min_c": _num(F.get("min_c"),2), "soc_floor_pct": _num(F.get("soc_floor_pct"),60)}
+    return c
+
+def frost_transform(flows, cfg):
+    """The Frost forecast tab (node-red/frost-forecast.flow.json): Open-Meteo every 2 h -> global frost_forecast,
+    which the dispatcher reads for the frost-night hold. Added only when hot_water_guard.frost.enabled."""
+    broker=next((n["id"] for n in flows if n.get("type")=="mqtt-broker"), None)
+    if not broker: raise RuntimeError("flow has no mqtt-broker node for the frost forecast")
+    loc=cfg.get("location",{}) or {}
+    raw=open(FROST_TAB).read().replace("__FROST_BROKER__", broker).replace("__FROST_MIN_C__", repr(_hw_guard(cfg)["frost"]["min_c"]))
+    raw=raw.replace("__LAT__", repr(_num(loc.get("lat"), -27.47))).replace("__LON__", repr(_num(loc.get("lon"), 153.02)))
+    return flows+json.loads(raw)
+
 # dispatcher.hot_water_2 defaults: Booster 2 only joins Booster 1, only on a nearly full battery, sheds first.
 HW2_DEFAULTS = {"surplus_on_w": None, "surplus_off_w": 0, "soc_on": 95, "soc_off": 90, "max_total_w": None,
                 "batt_trip_w": 2000, "sustain_on_ms": 60000, "sustain_off_ms": 60000,
@@ -357,6 +395,8 @@ def build_flow(cfg):
     raw=open(SRC_FLOW).read()
     tm=token_map(cfg)
     for tok,val in tm.items(): raw=raw.replace(tok, str(val))
+    guard=_hw_guard(cfg)
+    raw=raw.replace("__DISP_HW_GUARD__", json.dumps(json.dumps(guard))[1:-1])   # embedded inside a JSON string
     raw=raw.replace(CERBO_ARCHIVE, archive_dir(cfg))
     leftover=sorted(set(re.findall(r"__[A-Z0-9_]+__", raw)))
     flows=json.loads(raw)                                  # validates JSON post-substitution
@@ -368,6 +408,12 @@ def build_flow(cfg):
     elif hw and _driver(hw)=="shelly":
         flows,dropped=shelly_transform(flows, hw)
         ok("Shelly: hot water switches over MQTT RPC on '%s/rpc' (removed %s)" % (_shelly_cfg(hw)["topic_prefix"], ", ".join(dropped)))
+    if guard["min_on_ms"] or guard["min_off_ms"]:
+        ok("Hot-water guard: stays on >= %d min, off >= %d min between runs" % (guard["min_on_ms"]//60000, guard["min_off_ms"]//60000))
+    if guard["frost"]["enabled"]:
+        flows=frost_transform(flows, cfg)
+        ok("Frost hold: hot water powered all night when Open-Meteo's overnight minimum is <= %s C (SOC >= %s%%)"
+           % (guard["frost"]["min_c"], guard["frost"]["soc_floor_pct"]))
     if _inverter_kind(cfg)=="selectronic":
         flows,swapped=selectronic_transform(flows, _g(cfg,"hardware.selectronic.topic_prefix") or "sel")
         ok("Selectronic: swapped %d Victron input nodes for MQTT inputs (%s)" % (len(swapped), ", ".join(t for _,t in swapped[:6])+("…" if len(swapped)>6 else "")))

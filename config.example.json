@@ -186,7 +186,17 @@
     "_sustain": "Anti-flap dwell times (ms): a load must see the condition hold this long before it switches. *_curt variants apply while curtailed.",
     "_dispatch_end_offset_min": "Hot water stops being switched on this many minutes before sunset (default 120). Lower it (e.g. 60) to catch late-afternoon throttled solar, typical on a big lithium bank.",
     "_soc_windows": "Time-of-day battery SOC gates (on/off %, ON>OFF). W1 (early), W2 (midday), W3 (afternoon) progressively demand a fuller battery before dispatching, so loads run on genuine surplus. Defaults suit lead-acid (keep SOC high). For lithium you can lower these to cycle more.",
-    "_ac": "mode: 'heating' (fire when cold, ON<OFF — what ships) or 'cooling' (fire when hot, ON>OFF). NOTE: choosing 'cooling' flips the dashboard labels + setpoint sense, but the dispatcher's temperature COMPARISON ships in heating mode — true cooling-direction dispatch is a documented manual step (see install/troubleshooting.md → 'Summer cooling'), deliberately not auto-applied to the safety logic. inside_temp_on_c/off_c are the heating setpoints (also tunable live from the dashboard). inside_temp_source: tuya_plug | external | disabled."
+    "_ac": "mode: 'heating' (fire when cold, ON<OFF — what ships) or 'cooling' (fire when hot, ON>OFF). NOTE: choosing 'cooling' flips the dashboard labels + setpoint sense, but the dispatcher's temperature COMPARISON ships in heating mode — true cooling-direction dispatch is a documented manual step (see install/troubleshooting.md → 'Summer cooling'), deliberately not auto-applied to the safety logic. inside_temp_on_c/off_c are the heating setpoints (also tunable live from the dashboard). inside_temp_source: tuya_plug | external | disabled.",
+    "hot_water_guard": {
+      "min_on_ms": 0,
+      "min_off_ms": 0,
+      "frost": {
+        "enabled": false,
+        "min_c": 2,
+        "soc_floor_pct": 60
+      }
+    },
+    "_hot_water_guard": "For a HEAT-PUMP hot water (compressor). min_on_ms: once on, it stays on this long unless a safety gate trips or the daytime window ends (and no new start inside this long of the window's end). min_off_ms: rest at least this long between runs. frost: on a night whose Open-Meteo forecast minimum (from now until 09:00) is <= min_c, keep it powered all night so the unit's own freeze protection works; overrides the SOC windows and the night lockout, but never runs below soc_floor_pct (keep it >= battery.soc_danger_pct). Needs internet; a missing or stale forecast means no frost hold. All 0/false = the original element behaviour. e.g. a ~1 kW CO2 heat pump: min_on_ms 3600000, min_off_ms 900000, frost on, min_c 2, soc_floor_pct 60."
   },
   "display": {
     "currency": "AUD",

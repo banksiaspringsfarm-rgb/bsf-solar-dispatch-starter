@@ -5,7 +5,8 @@ instead of a Tuya plug. It is controlled over the site's own MQTT broker (the Pi
 so there is no cloud account, no developer project and no local key. Any Shelly with **Gen2 or newer firmware**
 (Plus / Pro / Gen3 / Gen4 / Powered-by-Shelly) works. Gen1 (Shelly 1, 1PM original) does not.
 
-Today only the `hot_water` load can be a Shelly.
+Today only the `hot_water` load can be a Shelly. A heat pump also needs the guard below
+([A heat-pump hot water](#a-heat-pump-hot-water-compressor-minimum-run-rest-and-frost)).
 
 ## What the dispatcher does with it
 
@@ -98,6 +99,30 @@ AC-coupled inverters tripping), the inverter carries everything until the dispat
 Set it to what your inverter can carry for that long, not its continuous rating. It defaults to the continuous
 rating, which means Booster 2 rarely runs. `safety_cap_w` must be above it, so Booster 2 always sheds before
 the safety cap trips Booster 1.
+
+## A heat-pump hot water (compressor): minimum run, rest, and frost
+
+A heat pump (e.g. a Sanden CO2 unit, ~1.1 kW) must not be switched like an element: short runs wear the
+compressor, and in winter the unit needs power overnight for its own freeze protection. Add to `dispatcher`:
+
+```json
+"hot_water_guard": { "min_on_ms": 3600000, "min_off_ms": 900000,
+                     "frost": { "enabled": true, "min_c": 2, "soc_floor_pct": 60 } }
+```
+
+- **min_on_ms**: once on, it stays on this long. Only a safety gate (stale inputs, the SOC window's floor, the load
+  cap) or the end of the daytime window stops it sooner. No new start inside this long of the window's end.
+- **min_off_ms**: it rests at least this long between runs, frost starts included.
+- **frost**: deploy.py adds a **Frost forecast** tab that asks Open-Meteo (free, no key) every 2 h for this site's
+  hourly temperature. If the lowest from now until 09:00 is at or below `min_c`, the dispatcher keeps the heat pump
+  powered from the end of the daytime window right through the night, ignoring the SOC windows. It never runs
+  below `soc_floor_pct`, which must be at or above `battery.soc_danger_pct`. Once a frost night starts it holds
+  until morning, even if a later forecast is warmer. With no internet, or a forecast older than 12 h, there is no
+  frost hold: it stays off, as it would without this. The status (`bsf/hotwater/status`) shows `frost_hold`,
+  `frost_night_min_c`, `min_on_left_s` and `min_off_left_s`.
+- The Shelly's dead-man still applies: if the Pi dies on a frost night, the relay switches off within `deadman_s`.
+
+`tests/test_hw_guard.py` runs the built dispatcher through each of these.
 
 ## 3. Install (electrician)
 
